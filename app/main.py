@@ -3,9 +3,11 @@ Vermietenheute Backend - Hauptanwendung.
 FastAPI-Anwendung mit CORS und allen Routen.
 """
 import os
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
 from app.config import settings
 from app.api import api_router
 
@@ -20,14 +22,38 @@ app = FastAPI(
     openapi_url="/api/openapi.json"
 )
 
-# CORS-Middleware konfigurieren
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_origins_list,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
+class DynamicCORSMiddleware(BaseHTTPMiddleware):
+    """
+    Dynamische CORS-Middleware.
+    Erlaubt explizite Origins und Wildcard-Patterns (*.vercel.app, *.railway.app).
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        origin = request.headers.get("origin")
+
+        # Preflight-Request (OPTIONS)
+        if request.method == "OPTIONS":
+            response = Response(status_code=200)
+            if origin and settings.is_origin_allowed(origin):
+                response.headers["Access-Control-Allow-Origin"] = origin
+                response.headers["Access-Control-Allow-Credentials"] = "true"
+                response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+                response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type, Accept"
+            return response
+
+        # Normale Requests
+        response = await call_next(request)
+
+        if origin and settings.is_origin_allowed(origin):
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+
+        return response
+
+
+# Dynamische CORS-Middleware hinzufügen
+app.add_middleware(DynamicCORSMiddleware)
 
 # Upload-Verzeichnis erstellen und statische Dateien mounten
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
