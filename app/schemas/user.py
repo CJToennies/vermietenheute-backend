@@ -30,11 +30,23 @@ class UserResponse(UserBase):
     """Schema für User-Response."""
     id: UUID
     is_active: bool
+    is_verified: bool
     created_at: datetime
     updated_at: datetime
 
     class Config:
         from_attributes = True
+
+
+class ResendVerificationRequest(BaseModel):
+    """Schema für erneutes Senden der Verifizierungs-E-Mail."""
+    email: EmailStr
+
+
+class VerificationResponse(BaseModel):
+    """Schema für Verifizierungs-Response."""
+    message: str
+    success: bool
 
 
 class Token(BaseModel):

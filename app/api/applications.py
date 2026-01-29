@@ -1,16 +1,21 @@
 """
 API-Endpoints für Bewerbungen (Applications).
-Erstellen und Verwalten von Mietbewerbungen.
+Erstellen und Verwalten von Mietbewerbungen mit E-Mail-Verifizierung.
 """
+import secrets
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, status
+from datetime import datetime, timedelta
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from app.core.deps import get_db, get_current_user
+from app.core.email import send_application_verification_email, send_application_confirmed_email
+from app.core.rate_limit import limiter, RATE_LIMIT_APPLICATION
+from app.config import settings
 from app.models.user import User
 from app.models.property import Property
 from app.models.application import Application
 from app.schemas.application import (
-    ApplicationCreate, ApplicationUpdate, ApplicationResponse
+    ApplicationCreate, ApplicationUpdate, ApplicationResponse, ApplicationVerificationResponse
 )
 
 
@@ -18,15 +23,19 @@ router = APIRouter()
 
 
 @router.post("", response_model=ApplicationResponse, status_code=status.HTTP_201_CREATED)
+@limiter.limit(RATE_LIMIT_APPLICATION)
 def create_application(
+    request: Request,
     application_data: ApplicationCreate,
     db: Session = Depends(get_db)
 ) -> Application:
     """
     Erstellt eine neue Bewerbung für eine Immobilie.
     Öffentlicher Endpoint - keine Authentifizierung erforderlich.
+    Sendet eine Verifizierungs-E-Mail an den Bewerber.
 
     Args:
+        request: FastAPI Request (für Rate Limiting)
         application_data: Bewerbungsdaten inkl. property_id
         db: Datenbank-Session
 
@@ -66,12 +75,30 @@ def create_application(
             detail="Sie haben sich bereits für diese Immobilie beworben"
         )
 
+    # Verifizierungstoken generieren
+    verification_token = secrets.token_urlsafe(32)
+    token_expires = datetime.utcnow() + timedelta(hours=settings.VERIFICATION_TOKEN_EXPIRE_HOURS)
+
     # Bewerbung erstellen
-    application = Application(**application_data.model_dump())
+    application = Application(
+        **application_data.model_dump(),
+        is_email_verified=False,
+        email_verification_token=verification_token,
+        email_verification_expires=token_expires
+    )
 
     db.add(application)
     db.commit()
     db.refresh(application)
+
+    # Verifizierungs-E-Mail senden
+    applicant_name = f"{application.first_name} {application.last_name}"
+    send_application_verification_email(
+        application.email,
+        verification_token,
+        property_obj.title,
+        applicant_name
+    )
 
     return application
 
@@ -220,3 +247,71 @@ def delete_application(
 
     db.delete(application)
     db.commit()
+
+
+@router.get("/verify/{token}", response_model=ApplicationVerificationResponse)
+def verify_application_email(
+    token: str,
+    db: Session = Depends(get_db)
+) -> dict:
+    """
+    Verifiziert die E-Mail-Adresse eines Bewerbers.
+
+    Args:
+        token: Verifizierungstoken aus der E-Mail
+        db: Datenbank-Session
+
+    Returns:
+        Erfolgsmeldung mit Immobilientitel
+
+    Raises:
+        HTTPException 400: Wenn Token ungültig oder abgelaufen
+    """
+    # Bewerbung mit Token suchen
+    application = db.query(Application).filter(
+        Application.email_verification_token == token
+    ).first()
+
+    if not application:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Ungültiger Verifizierungslink"
+        )
+
+    # Immobilie für Titel laden
+    property_obj = db.query(Property).filter(
+        Property.id == application.property_id
+    ).first()
+    property_title = property_obj.title if property_obj else "Unbekannt"
+
+    # Prüfen ob bereits verifiziert
+    if application.is_email_verified:
+        return {
+            "message": "E-Mail-Adresse wurde bereits verifiziert",
+            "success": True,
+            "property_title": property_title
+        }
+
+    # Prüfen ob Token abgelaufen
+    if application.email_verification_expires and application.email_verification_expires < datetime.utcnow():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Verifizierungslink ist abgelaufen"
+        )
+
+    # Bewerbung verifizieren
+    application.is_email_verified = True
+    application.email_verification_token = None
+    application.email_verification_expires = None
+
+    db.commit()
+
+    # Bestätigungs-E-Mail senden
+    applicant_name = f"{application.first_name} {application.last_name}"
+    send_application_confirmed_email(application.email, property_title, applicant_name)
+
+    return {
+        "message": "E-Mail-Adresse erfolgreich verifiziert",
+        "success": True,
+        "property_title": property_title
+    }

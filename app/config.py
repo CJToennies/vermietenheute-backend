@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     # Umgebung
     ENVIRONMENT: str = "development"
 
+    # Email (Resend)
+    RESEND_API_KEY: str = ""
+    FRONTEND_URL: str = "https://vermietenheute-frontend.vercel.app"
+    VERIFICATION_TOKEN_EXPIRE_HOURS: int = 24
+
     # Dynamische CORS-Patterns (Vercel, Railway, etc.)
     CORS_ALLOW_PATTERNS: List[str] = [
         r"https://.*\.vercel\.app",

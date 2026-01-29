@@ -19,6 +19,9 @@ class User(Base):
         password_hash: Gehashtes Passwort
         name: Anzeigename des Benutzers
         is_active: Ob der Account aktiv ist
+        is_verified: Ob die E-Mail verifiziert ist
+        verification_token: Token zur E-Mail-Verifizierung
+        verification_token_expires: Ablaufzeit des Tokens
         created_at: Erstellungszeitpunkt
         updated_at: Letzter Änderungszeitpunkt
     """
@@ -35,6 +38,9 @@ class User(Base):
     password_hash = Column(String(255), nullable=False)
     name = Column(String(100), nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
+    is_verified = Column(Boolean, default=False, nullable=False)
+    verification_token = Column(String(255), nullable=True, index=True)
+    verification_token_expires = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
         DateTime,

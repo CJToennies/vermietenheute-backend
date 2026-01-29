@@ -1,6 +1,6 @@
 """
 Vermietenheute Backend - Hauptanwendung.
-FastAPI-Anwendung mit CORS und allen Routen.
+FastAPI-Anwendung mit CORS, Rate Limiting und allen Routen.
 """
 import os
 from fastapi import FastAPI, Request
@@ -8,8 +8,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 from app.config import settings
 from app.api import api_router
+from app.core.rate_limit import limiter
 
 
 # FastAPI-Anwendung erstellen
@@ -21,6 +24,10 @@ app = FastAPI(
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json"
 )
+
+# Rate Limiter konfigurieren
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 class DynamicCORSMiddleware(BaseHTTPMiddleware):

@@ -3,9 +3,10 @@ API-Endpoints für Besichtigungstermine (Viewings) und Buchungen.
 """
 from typing import Optional
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from sqlalchemy.orm import Session
 from app.core.deps import get_db, get_current_user
+from app.core.rate_limit import limiter, RATE_LIMIT_BOOKING
 from app.models.user import User
 from app.models.property import Property
 from app.models.viewing import ViewingSlot
@@ -276,7 +277,9 @@ def delete_viewing_slot(
 
 
 @router.post("/{slot_id}/book", response_model=BookingResponse, status_code=status.HTTP_201_CREATED)
+@limiter.limit(RATE_LIMIT_BOOKING)
 def book_viewing_slot(
+    request: Request,
     slot_id: UUID,
     booking_data: BookingCreate,
     db: Session = Depends(get_db)
@@ -286,6 +289,7 @@ def book_viewing_slot(
     Öffentlicher Endpoint - keine Authentifizierung erforderlich.
 
     Args:
+        request: FastAPI Request (für Rate Limiting)
         slot_id: UUID des Termins
         booking_data: Buchungsdaten
         db: Datenbank-Session

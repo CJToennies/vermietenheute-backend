@@ -41,12 +41,20 @@ class ApplicationResponse(ApplicationBase):
     landlord_notes: Optional[str] = None
     rating: Optional[int] = None
     status: str
+    is_email_verified: bool = False
     has_self_disclosure: bool = False
     created_at: datetime
     updated_at: datetime
 
     class Config:
         from_attributes = True
+
+
+class ApplicationVerificationResponse(BaseModel):
+    """Schema für Bewerbungs-Verifizierungs-Response."""
+    message: str
+    success: bool
+    property_title: Optional[str] = None
 
 
 class ApplicationListResponse(BaseModel):

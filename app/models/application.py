@@ -3,7 +3,7 @@ Application Model - Bewerbungen für Mietobjekte.
 """
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Text, Integer, DateTime, ForeignKey
+from sqlalchemy import Column, String, Text, Integer, DateTime, ForeignKey, Boolean
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.ext.hybrid import hybrid_property
@@ -55,6 +55,9 @@ class Application(Base):
         default="neu",
         nullable=False
     )  # neu, in_pruefung, akzeptiert, abgelehnt
+    is_email_verified = Column(Boolean, default=False, nullable=False)
+    email_verification_token = Column(String(255), nullable=True, index=True)
+    email_verification_expires = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
         DateTime,
