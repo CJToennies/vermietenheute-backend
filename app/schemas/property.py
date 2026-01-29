@@ -23,6 +23,7 @@ class PropertyBase(BaseModel):
     available_from: Optional[date] = None
     furnished: bool = False
     pets_allowed: bool = False
+    listing_url: Optional[str] = Field(None, max_length=500)
 
 
 class PropertyCreate(PropertyBase):
@@ -45,6 +46,7 @@ class PropertyUpdate(BaseModel):
     available_from: Optional[date] = None
     furnished: Optional[bool] = None
     pets_allowed: Optional[bool] = None
+    listing_url: Optional[str] = Field(None, max_length=500)
     is_active: Optional[bool] = None
 
 

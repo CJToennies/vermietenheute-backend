@@ -61,6 +61,7 @@ class Property(Base):
     available_from = Column(Date, nullable=True)
     furnished = Column(Boolean, default=False, nullable=False)
     pets_allowed = Column(Boolean, default=False, nullable=False)
+    listing_url = Column(String(500), nullable=True)  # Externe Anzeigen-URL (ImmobilienScout, etc.)
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
