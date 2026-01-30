@@ -6,6 +6,8 @@ from uuid import UUID
 from typing import Optional, List
 from datetime import datetime
 from pydantic import BaseModel, EmailStr, Field
+import os
+import shutil
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.core.deps import get_db
@@ -269,4 +271,63 @@ def update_application(
         "last_name": application.last_name,
         "email": application.email,
         "phone": application.phone
+    }
+
+
+class DeleteConfirmationRequest(BaseModel):
+    """Schema für Lösch-Bestätigung."""
+    confirm: bool = False
+
+
+class DeleteResponse(BaseModel):
+    """Schema für Lösch-Response."""
+    message: str
+    deleted: bool
+
+
+@router.delete("/portal/{access_token}", response_model=DeleteResponse)
+def delete_application(
+    access_token: str,
+    confirmation: DeleteConfirmationRequest,
+    db: Session = Depends(get_db)
+) -> dict:
+    """
+    Löscht die Bewerbung inkl. aller Dokumente und Selbstauskunft.
+    DSGVO-konform: Bewerber kann seine Daten löschen.
+
+    Args:
+        access_token: Zugangstoken der Bewerbung
+        confirmation: Bestätigung (confirm=True erforderlich)
+        db: Datenbank-Session
+
+    Returns:
+        Bestätigung der Löschung
+
+    Raises:
+        HTTPException 400: Wenn Bestätigung fehlt
+        HTTPException 404: Wenn Bewerbung nicht gefunden
+    """
+    if not confirmation.confirm:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Bitte bestätigen Sie die Löschung mit confirm=true"
+        )
+
+    application = get_application_by_access_token(db, access_token)
+
+    # Dokument-Dateien löschen
+    upload_base = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+        "uploads", "documents", str(application.id)
+    )
+    if os.path.exists(upload_base):
+        shutil.rmtree(upload_base)
+
+    # Bewerbung löschen (Cascade löscht Dokumente und Selbstauskunft in DB)
+    db.delete(application)
+    db.commit()
+
+    return {
+        "message": "Bewerbung und alle zugehörigen Daten wurden gelöscht",
+        "deleted": True
     }

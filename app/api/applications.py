@@ -15,7 +15,8 @@ from app.models.user import User
 from app.models.property import Property
 from app.models.application import Application
 from app.schemas.application import (
-    ApplicationCreate, ApplicationUpdate, ApplicationResponse, ApplicationCreateResponse, ApplicationVerificationResponse
+    ApplicationCreate, ApplicationUpdate, ApplicationResponse, ApplicationCreateResponse,
+    ApplicationVerificationResponse, application_to_response
 )
 
 
@@ -111,7 +112,7 @@ def get_application(
     application_id: UUID,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
-) -> Application:
+) -> dict:
     """
     Ruft eine einzelne Bewerbung ab.
     Nur der Eigentümer der zugehörigen Immobilie kann die Bewerbung sehen.
@@ -122,7 +123,7 @@ def get_application(
         db: Datenbank-Session
 
     Returns:
-        Die Bewerbung
+        Die Bewerbung inkl. Dokumente
 
     Raises:
         HTTPException 404: Wenn Bewerbung nicht gefunden
@@ -149,7 +150,7 @@ def get_application(
             detail="Keine Berechtigung für diese Bewerbung"
         )
 
-    return application
+    return application_to_response(application)
 
 
 @router.patch("/{application_id}", response_model=ApplicationResponse)
@@ -158,7 +159,7 @@ def update_application(
     application_data: ApplicationUpdate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
-) -> Application:
+) -> dict:
     """
     Aktualisiert eine Bewerbung (Notizen, Rating, Status).
     Nur der Eigentümer der zugehörigen Immobilie kann die Bewerbung bearbeiten.
@@ -205,7 +206,7 @@ def update_application(
     db.commit()
     db.refresh(application)
 
-    return application
+    return application_to_response(application)
 
 
 @router.delete("/{application_id}", status_code=status.HTTP_204_NO_CONTENT)

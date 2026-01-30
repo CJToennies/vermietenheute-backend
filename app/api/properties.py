@@ -13,7 +13,7 @@ from app.models.application import Application
 from app.schemas.property import (
     PropertyCreate, PropertyUpdate, PropertyResponse, PropertyListResponse
 )
-from app.schemas.application import ApplicationResponse, ApplicationListResponse
+from app.schemas.application import ApplicationResponse, ApplicationListResponse, application_to_response
 
 
 router = APIRouter()
@@ -283,6 +283,6 @@ def list_property_applications(
     applications = query.order_by(Application.created_at.desc()).all()
 
     return {
-        "items": applications,
+        "items": [application_to_response(app) for app in applications],
         "total": len(applications)
     }
