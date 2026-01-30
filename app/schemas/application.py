@@ -50,6 +50,23 @@ class ApplicationResponse(ApplicationBase):
         from_attributes = True
 
 
+class ApplicationCreateResponse(ApplicationBase):
+    """
+    Schema für Bewerbungs-Erstellungs-Response.
+    Enthält zusätzlich den access_token für das Bewerber-Portal.
+    """
+    id: UUID
+    property_id: UUID
+    status: str
+    is_email_verified: bool = False
+    access_token: str  # Für Bewerber-Portal-Zugang
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 class ApplicationVerificationResponse(BaseModel):
     """Schema für Bewerbungs-Verifizierungs-Response."""
     message: str

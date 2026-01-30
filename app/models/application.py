@@ -58,6 +58,7 @@ class Application(Base):
     is_email_verified = Column(Boolean, default=False, nullable=False)
     email_verification_token = Column(String(255), nullable=True, index=True)
     email_verification_expires = Column(DateTime, nullable=True)
+    access_token = Column(String(255), nullable=True, unique=True, index=True)  # Für Bewerber-Portal
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
         DateTime,
@@ -72,6 +73,11 @@ class Application(Base):
         "SelfDisclosure",
         back_populates="application",
         uselist=False,
+        cascade="all, delete-orphan"
+    )
+    documents = relationship(
+        "ApplicationDocument",
+        back_populates="application",
         cascade="all, delete-orphan"
     )
 

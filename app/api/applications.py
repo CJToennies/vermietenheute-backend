@@ -8,21 +8,21 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from app.core.deps import get_db, get_current_user
-from app.core.email import send_application_verification_email, send_application_confirmed_email
+from app.core.email import send_application_portal_email
 from app.core.rate_limit import limiter, RATE_LIMIT_APPLICATION
 from app.config import settings
 from app.models.user import User
 from app.models.property import Property
 from app.models.application import Application
 from app.schemas.application import (
-    ApplicationCreate, ApplicationUpdate, ApplicationResponse, ApplicationVerificationResponse
+    ApplicationCreate, ApplicationUpdate, ApplicationResponse, ApplicationCreateResponse, ApplicationVerificationResponse
 )
 
 
 router = APIRouter()
 
 
-@router.post("", response_model=ApplicationResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=ApplicationCreateResponse, status_code=status.HTTP_201_CREATED)
 @limiter.limit(RATE_LIMIT_APPLICATION)
 def create_application(
     request: Request,
@@ -75,8 +75,9 @@ def create_application(
             detail="Sie haben sich bereits für diese Immobilie beworben"
         )
 
-    # Verifizierungstoken generieren
+    # Tokens generieren
     verification_token = secrets.token_urlsafe(32)
+    access_token = secrets.token_urlsafe(32)
     token_expires = datetime.utcnow() + timedelta(hours=settings.VERIFICATION_TOKEN_EXPIRE_HOURS)
 
     # Bewerbung erstellen
@@ -84,20 +85,22 @@ def create_application(
         **application_data.model_dump(),
         is_email_verified=False,
         email_verification_token=verification_token,
-        email_verification_expires=token_expires
+        email_verification_expires=token_expires,
+        access_token=access_token
     )
 
     db.add(application)
     db.commit()
     db.refresh(application)
 
-    # Verifizierungs-E-Mail senden
+    # Portal-E-Mail senden (mit Verifizierungslink und Portal-Link)
     applicant_name = f"{application.first_name} {application.last_name}"
-    send_application_verification_email(
-        application.email,
-        verification_token,
-        property_obj.title,
-        applicant_name
+    send_application_portal_email(
+        to=application.email,
+        verification_token=verification_token,
+        access_token=access_token,
+        property_title=property_obj.title,
+        applicant_name=applicant_name
     )
 
     return application
@@ -305,10 +308,6 @@ def verify_application_email(
     application.email_verification_expires = None
 
     db.commit()
-
-    # Bestätigungs-E-Mail senden
-    applicant_name = f"{application.first_name} {application.last_name}"
-    send_application_confirmed_email(application.email, property_title, applicant_name)
 
     return {
         "message": "E-Mail-Adresse erfolgreich verifiziert",

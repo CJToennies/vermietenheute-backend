@@ -66,6 +66,7 @@ app.add_middleware(DynamicCORSMiddleware)
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(os.path.join(UPLOAD_DIR, "properties"), exist_ok=True)
+os.makedirs(os.path.join(UPLOAD_DIR, "documents"), exist_ok=True)
 app.mount("/static/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 
