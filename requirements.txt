@@ -26,3 +26,6 @@ resend>=0.7.0
 
 # Rate Limiting
 slowapi>=0.1.9
+
+# Supabase Storage
+supabase>=2.0.0

@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = "https://vermietenheute-frontend.vercel.app"
     VERIFICATION_TOKEN_EXPIRE_HOURS: int = 24
 
+    # Supabase Storage
+    SUPABASE_URL: str = ""
+    SUPABASE_SERVICE_KEY: str = ""
+    SUPABASE_STORAGE_BUCKET: str = "documents"
+
     # Dynamische CORS-Patterns (Vercel, Railway, etc.)
     CORS_ALLOW_PATTERNS: List[str] = [
         r"https://.*\.vercel\.app",

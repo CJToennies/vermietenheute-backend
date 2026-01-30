@@ -126,7 +126,7 @@ def application_to_response(application) -> dict:
                 "display_name": doc.display_name,
                 "category": doc.category,
                 "category_label": DOCUMENT_CATEGORY_LABELS.get(doc.category, doc.category),
-                "url": f"/static/{doc.filepath}",
+                "url": doc.url,  # Direkte Supabase Storage URL
                 "file_size": doc.file_size,
                 "file_size_formatted": format_file_size(doc.file_size),
                 "created_at": doc.created_at

@@ -6,11 +6,10 @@ from uuid import UUID
 from typing import Optional, List
 from datetime import datetime
 from pydantic import BaseModel, EmailStr, Field
-import os
-import shutil
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.core.deps import get_db
+from app.core.storage import delete_folder
 from app.models.application import Application
 from app.models.application_document import ApplicationDocument
 from app.models.property import Property
@@ -217,7 +216,7 @@ def get_portal_data(
                 "display_name": doc.display_name,
                 "category": doc.category,
                 "category_label": CATEGORY_LABELS.get(doc.category, doc.category),
-                "url": f"/static/{doc.filepath}",
+                "url": doc.url,  # Direkte Supabase Storage URL
                 "file_size": doc.file_size,
                 "file_size_formatted": format_file_size(doc.file_size),
                 "created_at": doc.created_at
@@ -315,13 +314,8 @@ def delete_application(
 
     application = get_application_by_access_token(db, access_token)
 
-    # Dokument-Dateien löschen
-    upload_base = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-        "uploads", "documents", str(application.id)
-    )
-    if os.path.exists(upload_base):
-        shutil.rmtree(upload_base)
+    # Dokument-Dateien aus Supabase Storage löschen
+    delete_folder(str(application.id))
 
     # Bewerbung löschen (Cascade löscht Dokumente und Selbstauskunft in DB)
     db.delete(application)

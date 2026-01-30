@@ -41,7 +41,8 @@ class ApplicationDocument(Base):
     filename = Column(String(255), nullable=False)
     display_name = Column(String(255), nullable=True)  # Für "sonstiges" Kategorie
     category = Column(String(50), nullable=False)  # gehaltsnachweis, schufa, ausweis, mietschuldenfreiheit, arbeitsvertrag, sonstiges
-    filepath = Column(String(500), nullable=False)
+    filepath = Column(String(500), nullable=False)  # Pfad in Supabase Storage
+    url = Column(String(1000), nullable=True)  # Öffentliche URL (Supabase Storage)
     file_size = Column(Integer, nullable=False)  # in Bytes
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 

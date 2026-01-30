@@ -1,13 +1,13 @@
 """
 API-Endpoints für Bewerber-Dokumente.
 Upload, Abruf und Löschung von Bewerbungsdokumenten.
+Nutzt Supabase Storage für persistente Dateispeicherung.
 """
-import os
 import uuid
-import shutil
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from app.core.deps import get_db
+from app.core.storage import upload_file, delete_file, get_content_type
 from app.models.application import Application
 from app.models.application_document import ApplicationDocument
 from app.schemas.application_document import (
@@ -21,9 +21,6 @@ from app.schemas.application_document import (
 
 router = APIRouter()
 
-# Upload-Verzeichnis
-UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "uploads", "documents")
-
 # Erlaubte Dateitypen
 ALLOWED_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png", ".docx", ".doc"}
 MAX_TOTAL_SIZE = 30 * 1024 * 1024  # 30 MB gesamt
@@ -32,7 +29,8 @@ MAX_DOCUMENTS = 10
 
 def get_file_extension(filename: str) -> str:
     """Gibt die Dateiendung zurück."""
-    return os.path.splitext(filename)[1].lower()
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    return f".{ext}" if ext else ""
 
 
 def is_allowed_file(filename: str) -> bool:
@@ -83,7 +81,7 @@ def document_to_response(doc: ApplicationDocument) -> dict:
         "category": doc.category,
         "category_label": CATEGORY_LABELS.get(doc.category, doc.category),
         "filepath": doc.filepath,
-        "url": f"/static/{doc.filepath}",
+        "url": doc.url,  # Direkte Supabase Storage URL
         "file_size": doc.file_size,
         "file_size_formatted": format_file_size(doc.file_size),
         "created_at": doc.created_at
@@ -165,21 +163,25 @@ async def upload_document(
             detail=f"Speicherlimit überschritten. Verfügbar: {format_file_size(remaining)}"
         )
 
-    # Upload-Verzeichnis erstellen
-    app_upload_dir = os.path.join(UPLOAD_DIR, str(application.id))
-    os.makedirs(app_upload_dir, exist_ok=True)
+    # Datei-Inhalt lesen
+    file_content = await file.read()
 
-    # Eindeutigen Dateinamen generieren
-    file_ext = get_file_extension(file.filename)
-    unique_filename = f"{uuid.uuid4()}{file_ext}"
-    filepath = os.path.join(app_upload_dir, unique_filename)
+    # Zu Supabase Storage hochladen
+    content_type = get_content_type(file.filename)
+    folder = str(application.id)
 
-    # Datei speichern
-    with open(filepath, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-
-    # Relativen Pfad für DB
-    relative_path = f"uploads/documents/{application.id}/{unique_filename}"
+    try:
+        storage_path, public_url = upload_file(
+            file_content=file_content,
+            filename=file.filename,
+            folder=folder,
+            content_type=content_type
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Fehler beim Hochladen: {str(e)}"
+        )
 
     # Datenbank-Eintrag erstellen
     document = ApplicationDocument(
@@ -187,7 +189,8 @@ async def upload_document(
         filename=file.filename,
         display_name=display_name if category == "sonstiges" else None,
         category=category,
-        filepath=relative_path,
+        filepath=storage_path,
+        url=public_url,
         file_size=file_size
     )
 
@@ -266,10 +269,9 @@ def delete_document(
             detail="Dokument nicht gefunden"
         )
 
-    # Datei löschen
-    full_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), document.filepath)
-    if os.path.exists(full_path):
-        os.remove(full_path)
+    # Datei aus Supabase Storage löschen
+    if document.filepath:
+        delete_file(document.filepath)
 
     # Datenbank-Eintrag löschen
     db.delete(document)
