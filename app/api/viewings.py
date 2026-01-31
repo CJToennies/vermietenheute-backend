@@ -55,8 +55,12 @@ def get_slot_response(slot: ViewingSlot, db: Session) -> dict:
         Booking.cancelled_at == None
     ).count()
 
+    # Nur ausstehende (pending) Einladungen zählen
+    # - accepted: bereits als Buchung gezählt
+    # - declined: nicht mehr relevant
     invitations_count = db.query(ViewingInvitation).filter(
-        ViewingInvitation.slot_id == slot.id
+        ViewingInvitation.slot_id == slot.id,
+        ViewingInvitation.status == "pending"
     ).count()
 
     return {
