@@ -38,15 +38,15 @@ def get_supabase_client() -> Client:
 
 def get_signed_url(storage_path: str, expiry_seconds: int = SIGNED_URL_EXPIRY) -> str:
     """
-    Generiert eine signierte URL für eine Datei.
-    Die URL ist nur für die angegebene Zeit gültig.
+    Generiert eine URL für eine Datei.
+    Versucht zuerst signed URL, dann public URL als Fallback.
 
     Args:
         storage_path: Pfad in Storage (z.B. "folder/file.pdf")
         expiry_seconds: Gültigkeit in Sekunden (default: 1 Stunde)
 
     Returns:
-        Signierte URL
+        URL zur Datei
 
     Raises:
         Exception: Bei Fehler
@@ -54,14 +54,38 @@ def get_signed_url(storage_path: str, expiry_seconds: int = SIGNED_URL_EXPIRY) -
     client = get_supabase_client()
     bucket = settings.SUPABASE_STORAGE_BUCKET
 
+    # Methode 1: Versuche signed URL (für private buckets)
     try:
         result = client.storage.from_(bucket).create_signed_url(
             path=storage_path,
             expires_in=expiry_seconds
         )
-        return result.get("signedURL") or result.get("signedUrl", "")
+
+        # Handle verschiedene Response-Formate
+        signed_url = None
+        if isinstance(result, dict):
+            signed_url = result.get("signedURL") or result.get("signedUrl") or result.get("data", {}).get("signedUrl")
+        elif hasattr(result, 'signed_url'):
+            signed_url = result.signed_url
+        elif isinstance(result, str):
+            signed_url = result
+
+        if signed_url:
+            return signed_url
     except Exception as e:
-        raise Exception(f"Fehler beim Erstellen der Signed URL: {str(e)}")
+        print(f"Signed URL Fehler (normal bei public bucket): {e}")
+
+    # Methode 2: Public URL (für public buckets)
+    try:
+        public_url = client.storage.from_(bucket).get_public_url(storage_path)
+        if public_url:
+            return public_url
+    except Exception as e:
+        print(f"Public URL Fehler: {e}")
+
+    # Methode 3: URL manuell bauen
+    base_url = settings.SUPABASE_URL.rstrip('/')
+    return f"{base_url}/storage/v1/object/public/{bucket}/{storage_path}"
 
 
 def upload_file(
