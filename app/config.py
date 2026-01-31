@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     # JWT Authentifizierung
     SECRET_KEY: str
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 4320  # 72 Stunden (3 Tage)
 
     # CORS
     CORS_ORIGINS: str = "http://localhost:3000"

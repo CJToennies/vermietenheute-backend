@@ -92,6 +92,7 @@ class ViewingSlotResponse(BaseModel):
     available_spots: int
     bookings_count: int = 0
     invitations_count: int = 0
+    attendee_names: List[str] = []  # Namen der Teilnehmer die zugesagt haben
     created_at: datetime
     updated_at: datetime
 
@@ -120,6 +121,21 @@ class ViewingInviteRequest(BaseModel):
     """Schema für Einladung eines Bewerbers."""
     application_id: UUID
     send_email: bool = True
+
+
+class ViewingBulkInviteRequest(BaseModel):
+    """Schema für Einladung zu mehreren Terminen."""
+    application_id: UUID
+    slot_ids: List[UUID]
+    send_email: bool = True
+
+
+class ViewingBulkInviteResponse(BaseModel):
+    """Schema für Bulk-Invite Response."""
+    invited_count: int
+    failed_count: int
+    invitations: List["ViewingInvitationResponse"]
+    errors: List[str]
 
 
 class ViewingInvitationResponse(BaseModel):

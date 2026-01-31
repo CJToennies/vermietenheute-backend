@@ -10,9 +10,11 @@ from app.core.deps import get_db, get_current_user
 from app.core.rate_limit import limiter, RATE_LIMIT_BOOKING
 from app.core.email import (
     send_viewing_invitation_email,
+    send_viewing_invitation_multi_email,
     send_viewing_confirmation_email,
     send_viewing_cancelled_email,
     send_viewing_rescheduled_email,
+    send_public_viewing_notification_email,
 )
 from app.core.ics import generate_ics, format_datetime_german
 from app.models.user import User
@@ -28,6 +30,8 @@ from app.schemas.viewing import (
     ViewingSlotResponse,
     ViewingSlotListResponse,
     ViewingInviteRequest,
+    ViewingBulkInviteRequest,
+    ViewingBulkInviteResponse,
     ViewingInvitationResponse,
     ViewingInvitationWithDetails,
     ViewingInvitationRespondRequest,
@@ -49,11 +53,19 @@ router = APIRouter()
 
 def get_slot_response(slot: ViewingSlot, db: Session) -> dict:
     """Erstellt ein Response-Dict für einen ViewingSlot."""
-    confirmed_count = db.query(Booking).filter(
+    # Bestätigte Buchungen abrufen (mit Namen)
+    confirmed_bookings = db.query(Booking).filter(
         Booking.slot_id == slot.id,
         Booking.confirmed == True,
         Booking.cancelled_at == None
-    ).count()
+    ).all()
+
+    confirmed_count = len(confirmed_bookings)
+
+    # Namen der Buchenden extrahieren
+    attendee_names = [
+        f"{b.first_name} {b.last_name}" for b in confirmed_bookings
+    ]
 
     # Nur ausstehende (pending) Einladungen zählen
     # - accepted: bereits als Buchung gezählt
@@ -75,6 +87,7 @@ def get_slot_response(slot: ViewingSlot, db: Session) -> dict:
         "available_spots": slot.max_attendees - confirmed_count,
         "bookings_count": confirmed_count,
         "invitations_count": invitations_count,
+        "attendee_names": attendee_names,
         "created_at": slot.created_at,
         "updated_at": slot.updated_at
     }
@@ -852,6 +865,444 @@ def invite_applicant(
     return invitation
 
 
+@router.post("/bulk-invite", response_model=ViewingBulkInviteResponse)
+def bulk_invite_applicant(
+    data: ViewingBulkInviteRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> dict:
+    """
+    Lädt einen Bewerber zu mehreren Terminen ein und sendet eine zusammengefasste E-Mail.
+
+    Args:
+        data: Bulk-Einladungsdaten (application_id, slot_ids, send_email)
+        db: Datenbank-Session
+        current_user: Authentifizierter Benutzer
+
+    Returns:
+        Zusammenfassung der Einladungen
+    """
+    # Application prüfen
+    application = db.query(Application).filter(
+        Application.id == data.application_id
+    ).first()
+
+    if not application:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Bewerbung nicht gefunden"
+        )
+
+    # Property für Berechtigungsprüfung
+    property_obj = db.query(Property).filter(
+        Property.id == application.property_id
+    ).first()
+
+    if not property_obj or property_obj.landlord_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Keine Berechtigung für diese Bewerbung"
+        )
+
+    invitations = []
+    errors = []
+    viewings_for_email = []
+
+    for slot_id in data.slot_ids:
+        try:
+            # Slot prüfen
+            slot = db.query(ViewingSlot).filter(ViewingSlot.id == slot_id).first()
+
+            if not slot:
+                errors.append(f"Termin {slot_id} nicht gefunden")
+                continue
+
+            # Prüfen ob Slot zur gleichen Property gehört
+            if slot.property_id != application.property_id:
+                errors.append(f"Termin {slot_id} gehört nicht zu dieser Immobilie")
+                continue
+
+            # Prüfen ob bereits eingeladen
+            existing = db.query(ViewingInvitation).filter(
+                ViewingInvitation.slot_id == slot_id,
+                ViewingInvitation.application_id == data.application_id
+            ).first()
+
+            if existing:
+                errors.append(f"Bereits eingeladen zu Termin am {slot.start_time.strftime('%d.%m.%Y %H:%M')}")
+                continue
+
+            # Einladung erstellen
+            invitation = ViewingInvitation(
+                slot_id=slot_id,
+                application_id=data.application_id
+            )
+
+            db.add(invitation)
+            db.flush()  # Um ID zu erhalten
+
+            invitations.append(invitation)
+
+            # Termin-Info für E-Mail sammeln
+            viewings_for_email.append({
+                "date": slot.start_time.strftime("%d.%m.%Y"),
+                "time": slot.start_time.strftime("%H:%M"),
+                "invitation_token": invitation.invitation_token,
+                "slot_type": slot.slot_type,
+            })
+
+        except Exception as e:
+            errors.append(str(e))
+
+    db.commit()
+
+    # Einladungen refreshen
+    for inv in invitations:
+        db.refresh(inv)
+
+    # Eine zusammengefasste E-Mail senden
+    if data.send_email and len(viewings_for_email) > 0:
+        send_viewing_invitation_multi_email(
+            to=application.email,
+            applicant_name=f"{application.first_name} {application.last_name}",
+            property_title=property_obj.title,
+            property_address=f"{property_obj.address}, {property_obj.zip_code} {property_obj.city}",
+            viewings=viewings_for_email,
+            portal_token=application.access_token or "",
+            landlord_name=current_user.name,
+        )
+
+    return {
+        "invited_count": len(invitations),
+        "failed_count": len(errors),
+        "invitations": invitations,
+        "errors": errors,
+    }
+
+
+@router.delete("/invitation/{invitation_id}", status_code=status.HTTP_204_NO_CONTENT)
+def cancel_invitation(
+    invitation_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> None:
+    """
+    Storniert/Löscht eine Besichtigungseinladung (durch Vermieter).
+    Falls eine Buchung existiert, wird diese ebenfalls storniert.
+
+    Args:
+        invitation_id: UUID der Einladung
+        db: Datenbank-Session
+        current_user: Authentifizierter Benutzer
+    """
+    invitation = db.query(ViewingInvitation).filter(
+        ViewingInvitation.id == invitation_id
+    ).first()
+
+    if not invitation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Einladung nicht gefunden"
+        )
+
+    # Slot und Property für Berechtigungsprüfung
+    slot = db.query(ViewingSlot).filter(ViewingSlot.id == invitation.slot_id).first()
+    if not slot:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Termin nicht gefunden"
+        )
+
+    property_obj = db.query(Property).filter(Property.id == slot.property_id).first()
+    if not property_obj or property_obj.landlord_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Keine Berechtigung für diese Einladung"
+        )
+
+    # Bewerber-Daten für E-Mail
+    application = db.query(Application).filter(
+        Application.id == invitation.application_id
+    ).first()
+
+    # Falls eine Buchung existiert, diese auch stornieren
+    booking = db.query(Booking).filter(
+        Booking.invitation_id == invitation_id,
+        Booking.cancelled_at == None
+    ).first()
+
+    if booking:
+        booking.cancel()
+
+    # Einladung löschen
+    db.delete(invitation)
+    db.commit()
+
+    # Bewerber benachrichtigen
+    if application:
+        send_viewing_cancelled_email(
+            to=application.email,
+            applicant_name=f"{application.first_name} {application.last_name}",
+            property_title=property_obj.title,
+            property_address=f"{property_obj.address}, {property_obj.zip_code} {property_obj.city}",
+            viewing_date=slot.start_time.strftime("%d.%m.%Y"),
+            viewing_time=slot.start_time.strftime("%H:%M"),
+            cancelled_by="landlord"
+        )
+
+
+@router.post("/{slot_id}/notify-applicants")
+def notify_applicants_about_slot(
+    slot_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> dict:
+    """
+    Benachrichtigt alle Bewerber einer Property über einen öffentlichen Termin.
+    Bewerber die bereits einen Einzeltermin gebucht haben werden ausgeschlossen.
+
+    Args:
+        slot_id: UUID des Termins
+        db: Datenbank-Session
+        current_user: Authentifizierter Benutzer
+
+    Returns:
+        Anzahl der benachrichtigten Bewerber
+    """
+    slot = db.query(ViewingSlot).filter(ViewingSlot.id == slot_id).first()
+
+    if not slot:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Besichtigungstermin nicht gefunden"
+        )
+
+    # Berechtigung prüfen
+    property_obj = db.query(Property).filter(Property.id == slot.property_id).first()
+    if not property_obj or property_obj.landlord_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Keine Berechtigung für diesen Termin"
+        )
+
+    # Prüfen ob Termin öffentlich ist
+    if slot.access_type != "public":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Nur öffentliche Termine können an alle Bewerber gesendet werden"
+        )
+
+    # Alle Bewerber der Property holen
+    applications = db.query(Application).filter(
+        Application.property_id == slot.property_id
+    ).all()
+
+    # Bewerber die bereits einen AKTIVEN Einzeltermin gebucht haben ausschließen
+    # Aktiv = nicht storniert UND Termin liegt in der Zukunft
+    now = datetime.utcnow()
+    applicants_with_individual_booking = set()
+    individual_bookings = db.query(Booking).join(ViewingSlot).filter(
+        ViewingSlot.property_id == slot.property_id,
+        ViewingSlot.slot_type == "individual",
+        ViewingSlot.start_time >= now,  # Nur zukünftige Termine
+        Booking.confirmed == True,
+        Booking.cancelled_at == None,  # Nicht storniert
+        Booking.application_id != None
+    ).all()
+
+    for booking in individual_bookings:
+        applicants_with_individual_booking.add(booking.application_id)
+
+    # Verfügbare Plätze berechnen
+    confirmed_count = db.query(Booking).filter(
+        Booking.slot_id == slot_id,
+        Booking.confirmed == True,
+        Booking.cancelled_at == None
+    ).count()
+    available_spots = slot.max_attendees - confirmed_count
+
+    if available_spots <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Keine Plätze mehr verfügbar"
+        )
+
+    # Termin-Info für Email
+    viewing_info = [{
+        "date": slot.start_time.strftime("%d.%m.%Y"),
+        "time": slot.start_time.strftime("%H:%M"),
+        "slot_type": slot.slot_type,
+        "available_spots": available_spots,
+    }]
+
+    notified_count = 0
+    skipped_individual = 0
+    skipped_no_token = 0
+    skipped_not_verified = 0
+
+    for app in applications:
+        # Bewerber mit Einzeltermin-Buchung überspringen
+        if app.id in applicants_with_individual_booking:
+            skipped_individual += 1
+            continue
+
+        # Nur verifizierte E-Mail-Adressen
+        if not app.is_email_verified:
+            skipped_not_verified += 1
+            continue
+
+        # Email senden (nur wenn access_token vorhanden)
+        if app.access_token:
+            send_public_viewing_notification_email(
+                to=app.email,
+                applicant_name=f"{app.first_name} {app.last_name}",
+                property_title=property_obj.title,
+                property_address=f"{property_obj.address}, {property_obj.zip_code} {property_obj.city}",
+                viewings=viewing_info,
+                portal_token=app.access_token,
+                landlord_name=current_user.name,
+            )
+            notified_count += 1
+        else:
+            skipped_no_token += 1
+
+    return {
+        "success": True,
+        "notified_count": notified_count,
+        "total_applicants": len(applications),
+        "excluded_individual_booking": skipped_individual,
+        "excluded_not_verified": skipped_not_verified,
+        "excluded_no_token": skipped_no_token,
+        "message": f"{notified_count} von {len(applications)} Bewerbern wurden benachrichtigt"
+    }
+
+
+@router.post("/property/{property_id}/notify-applicants")
+def notify_applicants_about_property_slots(
+    property_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> dict:
+    """
+    Benachrichtigt alle Bewerber über alle verfügbaren öffentlichen Termine einer Property.
+    Bewerber die bereits einen Einzeltermin gebucht haben werden ausgeschlossen.
+
+    Args:
+        property_id: UUID der Immobilie
+        db: Datenbank-Session
+        current_user: Authentifizierter Benutzer
+
+    Returns:
+        Anzahl der benachrichtigten Bewerber
+    """
+    # Berechtigung prüfen
+    property_obj = db.query(Property).filter(Property.id == property_id).first()
+    if not property_obj or property_obj.landlord_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Keine Berechtigung für diese Immobilie"
+        )
+
+    # Alle öffentlichen, zukünftigen Termine mit freien Plätzen
+    now = datetime.utcnow()
+    public_slots = db.query(ViewingSlot).filter(
+        ViewingSlot.property_id == property_id,
+        ViewingSlot.access_type == "public",
+        ViewingSlot.start_time >= now
+    ).order_by(ViewingSlot.start_time).all()
+
+    # Slots mit freien Plätzen filtern
+    available_slots = []
+    for slot in public_slots:
+        confirmed_count = db.query(Booking).filter(
+            Booking.slot_id == slot.id,
+            Booking.confirmed == True,
+            Booking.cancelled_at == None
+        ).count()
+        available_spots = slot.max_attendees - confirmed_count
+        if available_spots > 0:
+            available_slots.append({
+                "slot": slot,
+                "available_spots": available_spots
+            })
+
+    if not available_slots:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Keine öffentlichen Termine mit freien Plätzen verfügbar"
+        )
+
+    # Alle Bewerber der Property holen
+    applications = db.query(Application).filter(
+        Application.property_id == property_id
+    ).all()
+
+    # Bewerber die bereits einen AKTIVEN Einzeltermin gebucht haben ausschließen
+    # Aktiv = nicht storniert UND Termin liegt in der Zukunft
+    applicants_with_individual_booking = set()
+    individual_bookings = db.query(Booking).join(ViewingSlot).filter(
+        ViewingSlot.property_id == property_id,
+        ViewingSlot.slot_type == "individual",
+        ViewingSlot.start_time >= now,  # Nur zukünftige Termine
+        Booking.confirmed == True,
+        Booking.cancelled_at == None,  # Nicht storniert
+        Booking.application_id != None
+    ).all()
+
+    for booking in individual_bookings:
+        applicants_with_individual_booking.add(booking.application_id)
+
+    # Termin-Infos für Email
+    viewings_info = [{
+        "date": s["slot"].start_time.strftime("%d.%m.%Y"),
+        "time": s["slot"].start_time.strftime("%H:%M"),
+        "slot_type": s["slot"].slot_type,
+        "available_spots": s["available_spots"],
+    } for s in available_slots]
+
+    notified_count = 0
+    skipped_individual = 0
+    skipped_no_token = 0
+    skipped_not_verified = 0
+
+    for app in applications:
+        # Bewerber mit Einzeltermin-Buchung überspringen
+        if app.id in applicants_with_individual_booking:
+            skipped_individual += 1
+            continue
+
+        # Nur verifizierte E-Mail-Adressen
+        if not app.is_email_verified:
+            skipped_not_verified += 1
+            continue
+
+        # Email senden (nur wenn access_token vorhanden)
+        if app.access_token:
+            send_public_viewing_notification_email(
+                to=app.email,
+                applicant_name=f"{app.first_name} {app.last_name}",
+                property_title=property_obj.title,
+                property_address=f"{property_obj.address}, {property_obj.zip_code} {property_obj.city}",
+                viewings=viewings_info,
+                portal_token=app.access_token,
+                landlord_name=current_user.name,
+            )
+            notified_count += 1
+        else:
+            skipped_no_token += 1
+
+    return {
+        "success": True,
+        "notified_count": notified_count,
+        "total_applicants": len(applications),
+        "excluded_individual_booking": skipped_individual,
+        "excluded_not_verified": skipped_not_verified,
+        "excluded_no_token": skipped_no_token,
+        "slots_count": len(available_slots),
+        "message": f"{notified_count} von {len(applications)} Bewerbern wurden über {len(available_slots)} Termine benachrichtigt"
+    }
+
+
 @router.get("/{slot_id}/invitations", response_model=List[ViewingInvitationWithDetails])
 def get_slot_invitations(
     slot_id: UUID,
@@ -965,10 +1416,20 @@ def get_application_invitations(
         ).first()
 
         if slot:
+            # Prüfen ob Buchung existiert und storniert wurde
+            booking_cancelled = False
+            if inv.status == "accepted":
+                booking = db.query(Booking).filter(
+                    Booking.invitation_id == inv.id
+                ).first()
+                if booking and booking.cancelled_at:
+                    booking_cancelled = True
+
             result.append({
                 "id": str(inv.id),
                 "slot_id": str(inv.slot_id),
                 "status": inv.status,
+                "booking_cancelled": booking_cancelled,
                 "invited_at": inv.invited_at.isoformat(),
                 "responded_at": inv.responded_at.isoformat() if inv.responded_at else None,
                 "slot_start_time": slot.start_time.isoformat(),
@@ -1115,6 +1576,16 @@ def respond_to_invitation(
 
     # Einladung annehmen
     invitation.accept()
+
+    # Alle anderen ausstehenden Einladungen des Bewerbers löschen
+    other_invitations = db.query(ViewingInvitation).filter(
+        ViewingInvitation.application_id == application.id,
+        ViewingInvitation.id != invitation.id,
+        ViewingInvitation.status == "pending"
+    ).all()
+
+    for other_inv in other_invitations:
+        db.delete(other_inv)
 
     # Buchung erstellen
     booking = Booking(

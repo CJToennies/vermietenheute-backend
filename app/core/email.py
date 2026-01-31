@@ -878,6 +878,231 @@ def send_viewing_rescheduled_email(
         return False
 
 
+def send_viewing_invitation_multi_email(
+    to: str,
+    applicant_name: str,
+    property_title: str,
+    property_address: str,
+    viewings: list[dict],  # Liste von {date, time, invitation_token, slot_type}
+    portal_token: str,
+    landlord_name: str,
+) -> bool:
+    """
+    Sendet eine Besichtigungseinladung mit mehreren Terminoptionen.
+
+    Args:
+        to: E-Mail-Adresse des Bewerbers
+        applicant_name: Name des Bewerbers
+        property_title: Titel der Immobilie
+        property_address: Adresse der Immobilie
+        viewings: Liste von Terminen mit date, time, invitation_token, slot_type
+        portal_token: Token für Bewerber-Portal
+        landlord_name: Name des Vermieters
+
+    Returns:
+        True wenn erfolgreich, False bei Fehler
+    """
+    portal_url = f"{settings.FRONTEND_URL}/bewerben/portal/{portal_token}"
+
+    if not settings.RESEND_API_KEY:
+        print(f"[DEV] Besichtigungseinladung (Multi) an {to}:")
+        for v in viewings:
+            print(f"  - {v['date']} um {v['time']}")
+        return True
+
+    init_resend()
+
+    # Termine als HTML-Liste formatieren
+    viewings_html = ""
+    for v in viewings:
+        accept_url = f"{settings.FRONTEND_URL}/bewerben/viewing/{v['invitation_token']}/accept"
+        decline_url = f"{settings.FRONTEND_URL}/bewerben/viewing/{v['invitation_token']}/decline"
+        slot_type_label = "Sammelbesichtigung" if v.get('slot_type') == 'group' else "Einzeltermin"
+
+        viewings_html += f"""
+        <div style="background-color: #f9fafb; padding: 15px; border-radius: 6px; margin: 10px 0; border-left: 4px solid #2563eb;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <p style="margin: 0; font-weight: bold;">
+                        📅 {v['date']} um {v['time']} Uhr
+                    </p>
+                    <p style="margin: 5px 0 0 0; font-size: 12px; color: #666;">
+                        {slot_type_label}
+                    </p>
+                </div>
+            </div>
+            <div style="margin-top: 10px;">
+                <a href="{accept_url}"
+                   style="background-color: #059669; color: white; padding: 8px 16px; text-decoration: none; border-radius: 4px; display: inline-block; font-size: 14px; margin-right: 8px;">
+                    ✓ Zusagen
+                </a>
+                <a href="{decline_url}"
+                   style="background-color: #dc2626; color: white; padding: 8px 16px; text-decoration: none; border-radius: 4px; display: inline-block; font-size: 14px;">
+                    ✗ Absagen
+                </a>
+            </div>
+        </div>
+        """
+
+    html_content = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #2563eb;">Einladung zur Besichtigung</h2>
+        <p>Hallo {applicant_name},</p>
+        <p>Sie wurden zu {len(viewings)} Besichtigungstermin{'en' if len(viewings) > 1 else ''} eingeladen:</p>
+
+        <div style="background-color: #f3f4f6; padding: 15px; border-radius: 6px; margin: 20px 0;">
+            <p style="margin: 0; font-weight: bold; font-size: 16px;">
+                {property_title}
+            </p>
+            <p style="margin: 10px 0 0 0;">
+                📍 {property_address}
+            </p>
+        </div>
+
+        <h3 style="color: #374151; margin-top: 25px;">Verfügbare Termine</h3>
+        <p style="color: #666; font-size: 14px; margin-bottom: 15px;">
+            {'Wählen Sie einen oder mehrere Termine aus. Bei Einzelterminen gilt: Wer zuerst zusagt, bekommt den Termin.' if len(viewings) > 1 else 'Bitte bestätigen oder lehnen Sie den Termin ab.'}
+        </p>
+
+        {viewings_html}
+
+        <p style="color: #666; font-size: 14px; margin-top: 30px;">
+            Oder verwalten Sie Ihre Termine in Ihrem <a href="{portal_url}" style="color: #2563eb;">Bewerber-Portal</a>.
+        </p>
+
+        <p style="margin-top: 30px;">
+            Mit freundlichen Grüßen<br>
+            <strong>{landlord_name}</strong>
+        </p>
+
+        <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+        <p style="color: #999; font-size: 12px;">
+            Diese E-Mail wurde über VermietenHeute versendet.
+        </p>
+    </div>
+    """
+
+    try:
+        resend.Emails.send({
+            "from": "VermietenHeute <noreply@vermietenheute.de>",
+            "to": to,
+            "subject": f"Einladung zur Besichtigung - {property_title}" + (f" ({len(viewings)} Termine)" if len(viewings) > 1 else ""),
+            "html": html_content,
+        })
+        return True
+    except Exception as e:
+        print(f"Fehler beim E-Mail-Versand: {e}")
+        return False
+
+
+def send_public_viewing_notification_email(
+    to: str,
+    applicant_name: str,
+    property_title: str,
+    property_address: str,
+    viewings: list[dict],  # Liste von {date, time, slot_type, available_spots}
+    portal_token: str,
+    landlord_name: str,
+) -> bool:
+    """
+    Sendet eine Benachrichtigung über verfügbare öffentliche Besichtigungstermine.
+
+    Args:
+        to: E-Mail-Adresse des Bewerbers
+        applicant_name: Name des Bewerbers
+        property_title: Titel der Immobilie
+        property_address: Adresse der Immobilie
+        viewings: Liste von Terminen mit date, time, slot_type, available_spots
+        portal_token: Token für Bewerber-Portal
+        landlord_name: Name des Vermieters
+
+    Returns:
+        True wenn erfolgreich, False bei Fehler
+    """
+    portal_url = f"{settings.FRONTEND_URL}/bewerben/portal/{portal_token}"
+
+    if not settings.RESEND_API_KEY:
+        print(f"[DEV] Öffentliche Termine Benachrichtigung an {to}:")
+        for v in viewings:
+            print(f"  - {v['date']} um {v['time']} ({v['available_spots']} Plätze frei)")
+        return True
+
+    init_resend()
+
+    # Termine als HTML-Liste formatieren
+    viewings_html = ""
+    for v in viewings:
+        slot_type_label = "Sammelbesichtigung" if v.get('slot_type') == 'group' else "Einzeltermin"
+        spots_label = f"{v['available_spots']} {'Platz' if v['available_spots'] == 1 else 'Plätze'} frei"
+
+        viewings_html += f"""
+        <div style="background-color: #f9fafb; padding: 15px; border-radius: 6px; margin: 10px 0; border-left: 4px solid #059669;">
+            <div>
+                <p style="margin: 0; font-weight: bold;">
+                    📅 {v['date']} um {v['time']} Uhr
+                </p>
+                <p style="margin: 5px 0 0 0; font-size: 12px; color: #666;">
+                    {slot_type_label} · {spots_label}
+                </p>
+            </div>
+        </div>
+        """
+
+    html_content = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #059669;">🏠 Besichtigungstermine verfügbar!</h2>
+        <p>Hallo {applicant_name},</p>
+        <p>Für Ihre Bewerbung sind jetzt Besichtigungstermine verfügbar:</p>
+
+        <div style="background-color: #f3f4f6; padding: 15px; border-radius: 6px; margin: 20px 0;">
+            <p style="margin: 0; font-weight: bold; font-size: 16px;">
+                {property_title}
+            </p>
+            <p style="margin: 10px 0 0 0;">
+                📍 {property_address}
+            </p>
+        </div>
+
+        <h3 style="color: #374151; margin-top: 25px;">Verfügbare Termine</h3>
+
+        {viewings_html}
+
+        <p style="margin: 25px 0;">
+            <a href="{portal_url}"
+               style="background-color: #059669; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; display: inline-block;">
+                Jetzt Termin buchen
+            </a>
+        </p>
+
+        <p style="color: #666; font-size: 14px;">
+            Buchen Sie schnell - die Plätze sind begrenzt!
+        </p>
+
+        <p style="margin-top: 30px;">
+            Mit freundlichen Grüßen<br>
+            <strong>{landlord_name}</strong>
+        </p>
+
+        <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+        <p style="color: #999; font-size: 12px;">
+            Diese E-Mail wurde über VermietenHeute versendet.
+        </p>
+    </div>
+    """
+
+    try:
+        resend.Emails.send({
+            "from": "VermietenHeute <noreply@vermietenheute.de>",
+            "to": to,
+            "subject": f"Besichtigungstermine verfügbar - {property_title}",
+            "html": html_content,
+        })
+        return True
+    except Exception as e:
+        print(f"Fehler beim E-Mail-Versand: {e}")
+        return False
+
+
 def send_email_change_email(to: str, token: str, name: str) -> bool:
     """
     Sendet eine E-Mail zur Bestätigung der neuen E-Mail-Adresse.
