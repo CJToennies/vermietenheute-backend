@@ -62,11 +62,20 @@ def upload_file(
     storage_path = f"{folder}/{unique_name}"
 
     # Upload zu Supabase Storage
-    result = client.storage.from_(bucket).upload(
-        path=storage_path,
-        file=file_content,
-        file_options={"content-type": content_type}
-    )
+    try:
+        result = client.storage.from_(bucket).upload(
+            path=storage_path,
+            file=file_content,
+            file_options={"contentType": content_type}
+        )
+    except Exception as e:
+        error_msg = str(e)
+        if "Bucket not found" in error_msg or "bucket" in error_msg.lower():
+            raise Exception(
+                f"Supabase Storage Bucket '{bucket}' nicht gefunden. "
+                "Bitte erstellen Sie den Bucket im Supabase Dashboard unter Storage."
+            )
+        raise Exception(f"Upload fehlgeschlagen: {error_msg}")
 
     # Public URL generieren
     public_url = client.storage.from_(bucket).get_public_url(storage_path)

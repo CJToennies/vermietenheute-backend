@@ -138,10 +138,9 @@ async def upload_document(
             detail=f"Dateityp nicht erlaubt. Erlaubt: {', '.join(ALLOWED_EXTENSIONS)}"
         )
 
-    # Dateigröße ermitteln
-    file.file.seek(0, 2)
-    file_size = file.file.tell()
-    file.file.seek(0)
+    # Datei-Inhalt lesen (zuerst, um Größe zu ermitteln)
+    file_content = await file.read()
+    file_size = len(file_content)
 
     # Anzahl Dokumente prüfen
     doc_count = db.query(ApplicationDocument).filter(
@@ -163,12 +162,11 @@ async def upload_document(
             detail=f"Speicherlimit überschritten. Verfügbar: {format_file_size(remaining)}"
         )
 
-    # Datei-Inhalt lesen
-    file_content = await file.read()
-
     # Zu Supabase Storage hochladen
     content_type = get_content_type(file.filename)
     folder = str(application.id)
+
+    print(f"Upload: {file.filename} -> Content-Type: {content_type}")
 
     try:
         storage_path, public_url = upload_file(
