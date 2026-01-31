@@ -2,7 +2,7 @@
 API-Router für alle Endpoints.
 """
 from fastapi import APIRouter
-from app.api import auth, properties, applications, viewings, images, self_disclosure, portal, documents
+from app.api import auth, properties, applications, viewings, images, self_disclosure, portal, documents, upgrades
 
 # Haupt-API-Router
 api_router = APIRouter()
@@ -16,3 +16,4 @@ api_router.include_router(self_disclosure.router, prefix="/applications", tags=[
 api_router.include_router(viewings.router, prefix="/viewings", tags=["Besichtigungen"])
 api_router.include_router(portal.router, prefix="/applicant", tags=["Bewerber-Portal"])
 api_router.include_router(documents.router, prefix="/applicant", tags=["Bewerber-Dokumente"])
+api_router.include_router(upgrades.router, tags=["Upgrade/Monetarisierung"])

@@ -51,6 +51,18 @@ class User(Base):
     pending_email = Column(String(255), nullable=True)
     email_change_token = Column(String(255), nullable=True, index=True)
     email_change_token_expires = Column(DateTime, nullable=True)
+
+    # Feature-Flags (Monetarisierung)
+    feature_multi_property = Column(Boolean, default=False, nullable=False)
+    feature_unlimited_applications = Column(Boolean, default=False, nullable=False)
+    feature_frequent_listings = Column(Boolean, default=False, nullable=False)
+
+    # Stripe-Vorbereitung (für spätere Zahlungsintegration)
+    stripe_customer_id = Column(String(255), nullable=True, index=True)
+    subscription_status = Column(String(50), default="free", nullable=False)  # free, beta, active, cancelled
+    subscription_plan = Column(String(50), nullable=True)  # null, "pro", "business"
+    subscription_ends_at = Column(DateTime, nullable=True)
+
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
         DateTime,

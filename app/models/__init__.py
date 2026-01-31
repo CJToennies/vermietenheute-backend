@@ -11,6 +11,7 @@ from app.models.self_disclosure import SelfDisclosure
 from app.models.viewing import ViewingSlot
 from app.models.viewing_invitation import ViewingInvitation
 from app.models.booking import Booking
+from app.models.upgrade_event import UpgradeEvent
 
 # Alle Models für Alembic-Migrationen exportieren
 __all__ = [
@@ -22,5 +23,6 @@ __all__ = [
     "SelfDisclosure",
     "ViewingSlot",
     "ViewingInvitation",
-    "Booking"
+    "Booking",
+    "UpgradeEvent"
 ]

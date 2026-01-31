@@ -1159,3 +1159,116 @@ def send_email_change_email(to: str, token: str, name: str) -> bool:
     except Exception as e:
         print(f"Fehler beim E-Mail-Versand: {e}")
         return False
+
+
+def send_upgrade_notification_email(
+    user_email: str,
+    user_name: str,
+    feature: str,
+    properties_count: int,
+    trigger_context: str | None = None
+) -> bool:
+    """
+    Sendet interne Benachrichtigung bei Upgrade-Interesse.
+
+    Args:
+        user_email: E-Mail des Users der das Upgrade angefordert hat
+        user_name: Name des Users
+        feature: Name des Features (multi_property, unlimited_applications, frequent_listings)
+        properties_count: Anzahl der aktiven Objekte des Users
+        trigger_context: Wo wurde das Upgrade getriggert
+
+    Returns:
+        True wenn erfolgreich, False bei Fehler
+    """
+    from datetime import datetime
+
+    feature_names = {
+        "multi_property": "Mehrere Objekte",
+        "unlimited_applications": "Unbegrenzte Bewerbungen",
+        "frequent_listings": "Häufige Inserate"
+    }
+
+    feature_prices = {
+        "multi_property": "5,90 €/Monat",
+        "unlimited_applications": "5,90 €/Monat",
+        "frequent_listings": "5,90 €/Monat"
+    }
+
+    admin_email = settings.ADMIN_EMAIL
+
+    if not admin_email:
+        print(f"[DEV] Upgrade-Benachrichtigung:")
+        print(f"  - User: {user_name} ({user_email})")
+        print(f"  - Feature: {feature_names.get(feature, feature)}")
+        print(f"  - Objekte: {properties_count}")
+        print(f"  - Kontext: {trigger_context or 'N/A'}")
+        return True
+
+    if not settings.RESEND_API_KEY:
+        print(f"[DEV] Upgrade-Benachrichtigung (kein Resend):")
+        print(f"  - User: {user_name} ({user_email})")
+        print(f"  - Feature: {feature_names.get(feature, feature)}")
+        return True
+
+    init_resend()
+
+    html_content = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #059669;">Upgrade-Interesse registriert</h2>
+
+        <div style="background-color: #f0fdf4; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <table style="width: 100%; border-collapse: collapse;">
+                <tr>
+                    <td style="padding: 8px 0; color: #666;">Nutzer:</td>
+                    <td style="padding: 8px 0; font-weight: bold;">{user_name}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 8px 0; color: #666;">E-Mail:</td>
+                    <td style="padding: 8px 0;">{user_email}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 8px 0; color: #666;">Feature:</td>
+                    <td style="padding: 8px 0; font-weight: bold;">{feature_names.get(feature, feature)}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 8px 0; color: #666;">Preis:</td>
+                    <td style="padding: 8px 0;">{feature_prices.get(feature, "5,90 €/Monat")}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 8px 0; color: #666;">Aktive Objekte:</td>
+                    <td style="padding: 8px 0;">{properties_count}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 8px 0; color: #666;">Zeitpunkt:</td>
+                    <td style="padding: 8px 0;">{datetime.now().strftime('%d.%m.%Y %H:%M')} Uhr</td>
+                </tr>
+                {f'<tr><td style="padding: 8px 0; color: #666;">Kontext:</td><td style="padding: 8px 0;">{trigger_context}</td></tr>' if trigger_context else ''}
+            </table>
+        </div>
+
+        <div style="background-color: #fef3c7; padding: 15px; border-radius: 8px; margin: 20px 0;">
+            <p style="margin: 0; color: #92400e; font-size: 14px;">
+                <strong>Beta-Modus aktiv:</strong> Feature wurde kostenlos freigeschaltet.<br>
+                Dieser Nutzer hätte {feature_prices.get(feature, "5,90 €/Monat")} gezahlt.
+            </p>
+        </div>
+
+        <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+        <p style="color: #999; font-size: 12px;">
+            VermietenHeute - Interne Benachrichtigung
+        </p>
+    </div>
+    """
+
+    try:
+        resend.Emails.send({
+            "from": "VermietenHeute <noreply@vermietenheute.de>",
+            "to": admin_email,
+            "subject": f"[Upgrade] {user_name} - {feature_names.get(feature, feature)}",
+            "html": html_content,
+        })
+        return True
+    except Exception as e:
+        print(f"Fehler beim E-Mail-Versand (Admin): {e}")
+        return False

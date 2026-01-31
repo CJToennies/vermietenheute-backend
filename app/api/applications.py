@@ -3,10 +3,11 @@ API-Endpoints für Bewerbungen (Applications).
 Erstellen und Verwalten von Mietbewerbungen mit E-Mail-Verifizierung.
 """
 import secrets
+from typing import Optional
 from uuid import UUID
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, HTTPException, status, Request
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
+from sqlalchemy.orm import Session, joinedload
 from app.core.deps import get_db, get_current_user
 from app.core.email import send_application_portal_email, send_new_application_notification, send_landlord_to_applicant_email
 from app.core.rate_limit import limiter, RATE_LIMIT_APPLICATION
@@ -14,6 +15,7 @@ from app.config import settings
 from app.models.user import User
 from app.models.property import Property
 from app.models.application import Application
+from app.models.viewing_invitation import ViewingInvitation
 from app.schemas.application import (
     ApplicationCreate, ApplicationUpdate, ApplicationResponse, ApplicationCreateResponse,
     ApplicationVerificationResponse, application_to_response,
@@ -22,6 +24,75 @@ from app.schemas.application import (
 
 
 router = APIRouter()
+
+
+@router.get("", response_model=dict)
+def list_all_applications(
+    status_filter: Optional[str] = Query(None, description="Filter nach Status"),
+    property_id: Optional[UUID] = Query(None, description="Filter nach Property"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+) -> dict:
+    """
+    Listet alle Bewerbungen für alle Properties des aktuellen Users.
+    Optimiert für Dashboard-Übersicht (eager loading).
+
+    Returns:
+        Dict mit applications (inkl. property_title, property_rent, viewing_invitations)
+    """
+    # Alle Properties des Users laden
+    property_ids = db.query(Property.id).filter(
+        Property.landlord_id == current_user.id
+    ).all()
+    property_ids = [p.id for p in property_ids]
+
+    if not property_ids:
+        return {"items": [], "total": 0}
+
+    # Property-Infos laden (für Titel und Miete)
+    properties = db.query(Property).filter(Property.id.in_(property_ids)).all()
+    property_map = {p.id: {"title": p.title, "rent": p.rent} for p in properties}
+
+    # Alle Bewerbungen mit Eager Loading
+    query = db.query(Application).options(
+        joinedload(Application.documents),
+        joinedload(Application.self_disclosure),
+        joinedload(Application.viewing_invitations).joinedload(ViewingInvitation.viewing_slot)
+    ).filter(Application.property_id.in_(property_ids))
+
+    if status_filter:
+        query = query.filter(Application.status == status_filter)
+
+    if property_id:
+        query = query.filter(Application.property_id == property_id)
+
+    applications = query.order_by(Application.created_at.desc()).all()
+
+    # Response bauen
+    items = []
+    for app in applications:
+        app_dict = application_to_response(app)
+        app_dict["property_title"] = property_map.get(app.property_id, {}).get("title", "")
+        app_dict["property_rent"] = property_map.get(app.property_id, {}).get("rent", 0)
+
+        # Viewing Invitations hinzufügen
+        invitations = []
+        for inv in app.viewing_invitations:
+            inv_dict = {
+                "id": str(inv.id),
+                "slot_id": str(inv.slot_id),
+                "status": inv.status,
+                "booking_cancelled": inv.booking_cancelled,
+            }
+            if inv.viewing_slot:
+                inv_dict["slot_start_time"] = inv.viewing_slot.start_time.isoformat() if inv.viewing_slot.start_time else None
+                inv_dict["slot_end_time"] = inv.viewing_slot.end_time.isoformat() if inv.viewing_slot.end_time else None
+            invitations.append(inv_dict)
+        app_dict["viewing_invitations"] = invitations
+
+        items.append(app_dict)
+
+    return {"items": items, "total": len(items)}
 
 
 @router.post("", response_model=ApplicationCreateResponse, status_code=status.HTTP_201_CREATED)

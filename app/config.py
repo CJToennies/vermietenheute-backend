@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     SUPABASE_SERVICE_KEY: str = ""
     SUPABASE_STORAGE_BUCKET: str = "documents"
 
+    # Monetarisierung
+    BETA_MODE: bool = True  # Auf False setzen wenn Stripe aktiv
+    ADMIN_EMAIL: str = ""  # Email für Upgrade-Benachrichtigungen
+
     # Dynamische CORS-Patterns (Vercel, Railway, etc.)
     CORS_ALLOW_PATTERNS: List[str] = [
         r"https://.*\.vercel\.app",
