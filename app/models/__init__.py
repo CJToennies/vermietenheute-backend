@@ -9,6 +9,7 @@ from app.models.application import Application
 from app.models.application_document import ApplicationDocument
 from app.models.self_disclosure import SelfDisclosure
 from app.models.viewing import ViewingSlot
+from app.models.viewing_invitation import ViewingInvitation
 from app.models.booking import Booking
 
 # Alle Models für Alembic-Migrationen exportieren
@@ -20,5 +21,6 @@ __all__ = [
     "ApplicationDocument",
     "SelfDisclosure",
     "ViewingSlot",
+    "ViewingInvitation",
     "Booking"
 ]

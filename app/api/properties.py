@@ -86,8 +86,8 @@ def list_properties(
     """
     query = db.query(Property)
 
-    # Nur aktive anzeigen, außer include_inactive ist True oder landlord_id ist gesetzt
-    if not include_inactive and not landlord_id:
+    # Nur aktive anzeigen, außer include_inactive ist True
+    if not include_inactive:
         query = query.filter(Property.is_active == True)
 
     # Filter anwenden

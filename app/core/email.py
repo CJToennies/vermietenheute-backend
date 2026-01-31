@@ -372,6 +372,512 @@ def send_landlord_to_applicant_email(
         return False
 
 
+def send_viewing_invitation_email(
+    to: str,
+    applicant_name: str,
+    property_title: str,
+    property_address: str,
+    viewing_date: str,
+    viewing_time: str,
+    invitation_token: str,
+    portal_token: str,
+    landlord_name: str,
+    ics_data: bytes | None = None
+) -> bool:
+    """
+    Sendet eine Besichtigungseinladung an einen Bewerber.
+
+    Args:
+        to: E-Mail-Adresse des Bewerbers
+        applicant_name: Name des Bewerbers
+        property_title: Titel der Immobilie
+        property_address: Adresse der Immobilie
+        viewing_date: Datum der Besichtigung (formatiert)
+        viewing_time: Uhrzeit der Besichtigung (formatiert)
+        invitation_token: Token für direkten Einladungslink
+        portal_token: Token für Bewerber-Portal
+        landlord_name: Name des Vermieters
+        ics_data: Optional - ICS-Kalenderdatei als Bytes
+
+    Returns:
+        True wenn erfolgreich, False bei Fehler
+    """
+    accept_url = f"{settings.FRONTEND_URL}/bewerben/viewing/{invitation_token}/accept"
+    decline_url = f"{settings.FRONTEND_URL}/bewerben/viewing/{invitation_token}/decline"
+    portal_url = f"{settings.FRONTEND_URL}/bewerben/portal/{portal_token}"
+
+    if not settings.RESEND_API_KEY:
+        print(f"[DEV] Besichtigungseinladung an {to}:")
+        print(f"  - Termin: {viewing_date} um {viewing_time}")
+        print(f"  - Zusagen: {accept_url}")
+        print(f"  - Absagen: {decline_url}")
+        return True
+
+    init_resend()
+
+    html_content = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #2563eb;">Einladung zur Besichtigung</h2>
+        <p>Hallo {applicant_name},</p>
+        <p>Sie wurden zu einer Besichtigung eingeladen:</p>
+
+        <div style="background-color: #f3f4f6; padding: 20px; border-radius: 6px; margin: 20px 0;">
+            <p style="margin: 5px 0; font-weight: bold; font-size: 16px;">
+                {property_title}
+            </p>
+            <p style="margin: 10px 0;">
+                <span style="font-size: 20px;">📍</span> {property_address}
+            </p>
+            <p style="margin: 10px 0;">
+                <span style="font-size: 20px;">📅</span> {viewing_date}
+            </p>
+            <p style="margin: 10px 0;">
+                <span style="font-size: 20px;">🕐</span> {viewing_time} Uhr
+            </p>
+        </div>
+
+        <p style="margin: 25px 0; text-align: center;">
+            <a href="{accept_url}"
+               style="background-color: #059669; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; display: inline-block; margin-right: 10px;">
+                ✓ Termin zusagen
+            </a>
+            <a href="{decline_url}"
+               style="background-color: #dc2626; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; display: inline-block;">
+                ✗ Termin absagen
+            </a>
+        </p>
+
+        <p style="color: #666; font-size: 14px; margin-top: 30px;">
+            Oder verwalten Sie Ihre Termine in Ihrem <a href="{portal_url}" style="color: #2563eb;">Bewerber-Portal</a>.
+        </p>
+
+        <p style="margin-top: 30px;">
+            Mit freundlichen Grüßen<br>
+            <strong>{landlord_name}</strong>
+        </p>
+
+        <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+        <p style="color: #999; font-size: 12px;">
+            Diese E-Mail wurde über VermietenHeute versendet.
+        </p>
+    </div>
+    """
+
+    try:
+        email_params = {
+            "from": "VermietenHeute <noreply@vermietenheute.de>",
+            "to": to,
+            "subject": f"Einladung zur Besichtigung - {property_title}",
+            "html": html_content,
+        }
+
+        # ICS-Anhang hinzufügen wenn vorhanden
+        if ics_data:
+            import base64
+            email_params["attachments"] = [{
+                "filename": "besichtigung.ics",
+                "content": base64.b64encode(ics_data).decode(),
+                "type": "text/calendar"
+            }]
+
+        resend.Emails.send(email_params)
+        return True
+    except Exception as e:
+        print(f"Fehler beim E-Mail-Versand: {e}")
+        return False
+
+
+def send_viewing_confirmation_email(
+    to: str,
+    applicant_name: str,
+    property_title: str,
+    property_address: str,
+    viewing_date: str,
+    viewing_time: str,
+    portal_token: str,
+    ics_data: bytes | None = None
+) -> bool:
+    """
+    Sendet eine Bestätigung nach Annahme einer Besichtigungseinladung.
+
+    Args:
+        to: E-Mail-Adresse des Bewerbers
+        applicant_name: Name des Bewerbers
+        property_title: Titel der Immobilie
+        property_address: Adresse der Immobilie
+        viewing_date: Datum der Besichtigung
+        viewing_time: Uhrzeit der Besichtigung
+        portal_token: Token für Bewerber-Portal
+        ics_data: Optional - ICS-Kalenderdatei
+
+    Returns:
+        True wenn erfolgreich, False bei Fehler
+    """
+    portal_url = f"{settings.FRONTEND_URL}/bewerben/portal/{portal_token}"
+
+    if not settings.RESEND_API_KEY:
+        print(f"[DEV] Besichtigungsbestätigung an {to}:")
+        print(f"  - Termin: {viewing_date} um {viewing_time}")
+        return True
+
+    init_resend()
+
+    html_content = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #059669;">✓ Termin bestätigt!</h2>
+        <p>Hallo {applicant_name},</p>
+        <p>Ihr Besichtigungstermin wurde bestätigt:</p>
+
+        <div style="background-color: #f0fdf4; padding: 20px; border-radius: 6px; margin: 20px 0; border-left: 4px solid #059669;">
+            <p style="margin: 5px 0; font-weight: bold; font-size: 16px;">
+                {property_title}
+            </p>
+            <p style="margin: 10px 0;">
+                <span style="font-size: 20px;">📍</span> {property_address}
+            </p>
+            <p style="margin: 10px 0;">
+                <span style="font-size: 20px;">📅</span> {viewing_date}
+            </p>
+            <p style="margin: 10px 0;">
+                <span style="font-size: 20px;">🕐</span> {viewing_time} Uhr
+            </p>
+        </div>
+
+        <p style="color: #666; font-size: 14px;">
+            Sie finden den Termin auch als Kalenderanhang in dieser E-Mail.
+        </p>
+
+        <p style="margin: 25px 0;">
+            <a href="{portal_url}"
+               style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">
+                Zum Bewerber-Portal
+            </a>
+        </p>
+
+        <p style="color: #666; font-size: 14px; margin-top: 30px; padding: 15px; background-color: #fef3c7; border-radius: 6px;">
+            <strong>Hinweis:</strong> Sie können den Termin bis 1 Stunde vorher über Ihr Portal stornieren.
+        </p>
+
+        <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+        <p style="color: #999; font-size: 12px;">
+            VermietenHeute - Die Plattform für Vermieter
+        </p>
+    </div>
+    """
+
+    try:
+        email_params = {
+            "from": "VermietenHeute <noreply@vermietenheute.de>",
+            "to": to,
+            "subject": f"Termin bestätigt - {property_title}",
+            "html": html_content,
+        }
+
+        if ics_data:
+            import base64
+            email_params["attachments"] = [{
+                "filename": "besichtigung.ics",
+                "content": base64.b64encode(ics_data).decode(),
+                "type": "text/calendar"
+            }]
+
+        resend.Emails.send(email_params)
+        return True
+    except Exception as e:
+        print(f"Fehler beim E-Mail-Versand: {e}")
+        return False
+
+
+def send_viewing_reminder_email(
+    to: str,
+    applicant_name: str,
+    property_title: str,
+    property_address: str,
+    viewing_date: str,
+    viewing_time: str,
+    reminder_type: str,  # "24h" oder "1h"
+    portal_token: str,
+    ics_data: bytes | None = None
+) -> bool:
+    """
+    Sendet eine Erinnerung an einen Besichtigungstermin.
+
+    Args:
+        to: E-Mail-Adresse des Bewerbers
+        applicant_name: Name des Bewerbers
+        property_title: Titel der Immobilie
+        property_address: Adresse der Immobilie
+        viewing_date: Datum der Besichtigung
+        viewing_time: Uhrzeit der Besichtigung
+        reminder_type: "24h" oder "1h"
+        portal_token: Token für Bewerber-Portal
+        ics_data: Optional - ICS-Kalenderdatei
+
+    Returns:
+        True wenn erfolgreich, False bei Fehler
+    """
+    portal_url = f"{settings.FRONTEND_URL}/bewerben/portal/{portal_token}"
+    reminder_text = "morgen" if reminder_type == "24h" else "in einer Stunde"
+
+    if not settings.RESEND_API_KEY:
+        print(f"[DEV] Erinnerung ({reminder_type}) an {to}:")
+        print(f"  - Termin: {viewing_date} um {viewing_time}")
+        return True
+
+    init_resend()
+
+    html_content = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #2563eb;">⏰ Erinnerung: Besichtigung {reminder_text}</h2>
+        <p>Hallo {applicant_name},</p>
+        <p>Ihre Besichtigung findet {reminder_text} statt:</p>
+
+        <div style="background-color: #f3f4f6; padding: 20px; border-radius: 6px; margin: 20px 0;">
+            <p style="margin: 5px 0; font-weight: bold; font-size: 16px;">
+                {property_title}
+            </p>
+            <p style="margin: 10px 0;">
+                <span style="font-size: 20px;">📍</span> {property_address}
+            </p>
+            <p style="margin: 10px 0;">
+                <span style="font-size: 20px;">📅</span> {viewing_date}
+            </p>
+            <p style="margin: 10px 0;">
+                <span style="font-size: 20px;">🕐</span> {viewing_time} Uhr
+            </p>
+        </div>
+
+        <p style="margin: 25px 0;">
+            <a href="{portal_url}"
+               style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">
+                Im Kalender öffnen
+            </a>
+        </p>
+
+        <p style="color: #666;">Wir freuen uns auf Sie!</p>
+
+        <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+        <p style="color: #999; font-size: 12px;">
+            VermietenHeute - Die Plattform für Vermieter
+        </p>
+    </div>
+    """
+
+    try:
+        email_params = {
+            "from": "VermietenHeute <noreply@vermietenheute.de>",
+            "to": to,
+            "subject": f"Erinnerung: Besichtigung {reminder_text} - {property_title}",
+            "html": html_content,
+        }
+
+        if ics_data:
+            import base64
+            email_params["attachments"] = [{
+                "filename": "besichtigung.ics",
+                "content": base64.b64encode(ics_data).decode(),
+                "type": "text/calendar"
+            }]
+
+        resend.Emails.send(email_params)
+        return True
+    except Exception as e:
+        print(f"Fehler beim E-Mail-Versand: {e}")
+        return False
+
+
+def send_viewing_cancelled_email(
+    to: str,
+    applicant_name: str,
+    property_title: str,
+    property_address: str,
+    viewing_date: str,
+    viewing_time: str,
+    cancelled_by: str,  # "landlord" oder "applicant"
+    reason: str | None = None
+) -> bool:
+    """
+    Sendet eine Benachrichtigung über einen abgesagten Termin.
+
+    Args:
+        to: E-Mail-Adresse des Empfängers
+        applicant_name: Name des Bewerbers
+        property_title: Titel der Immobilie
+        property_address: Adresse der Immobilie
+        viewing_date: Datum der Besichtigung
+        viewing_time: Uhrzeit der Besichtigung
+        cancelled_by: Wer hat abgesagt ("landlord" oder "applicant")
+        reason: Optional - Begründung
+
+    Returns:
+        True wenn erfolgreich, False bei Fehler
+    """
+    if not settings.RESEND_API_KEY:
+        print(f"[DEV] Absage-Benachrichtigung an {to}:")
+        print(f"  - Termin: {viewing_date} um {viewing_time}")
+        print(f"  - Abgesagt von: {cancelled_by}")
+        return True
+
+    init_resend()
+
+    if cancelled_by == "landlord":
+        subject = f"Termin abgesagt - {property_title}"
+        intro_text = "Der Vermieter hat den folgenden Besichtigungstermin leider abgesagt:"
+    else:
+        subject = f"Stornierung: {applicant_name}"
+        intro_text = f"{applicant_name} hat den folgenden Besichtigungstermin storniert:"
+
+    reason_html = ""
+    if reason:
+        reason_html = f"""
+        <p style="margin-top: 15px; padding: 15px; background-color: #f9fafb; border-radius: 6px;">
+            <strong>Begründung:</strong> {reason}
+        </p>
+        """
+
+    html_content = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #dc2626;">✗ Termin abgesagt</h2>
+        <p>Hallo,</p>
+        <p>{intro_text}</p>
+
+        <div style="background-color: #fef2f2; padding: 20px; border-radius: 6px; margin: 20px 0; border-left: 4px solid #dc2626;">
+            <p style="margin: 5px 0; font-weight: bold; font-size: 16px; text-decoration: line-through;">
+                {property_title}
+            </p>
+            <p style="margin: 10px 0; color: #666; text-decoration: line-through;">
+                📍 {property_address}
+            </p>
+            <p style="margin: 10px 0; color: #666; text-decoration: line-through;">
+                📅 {viewing_date} um {viewing_time} Uhr
+            </p>
+        </div>
+
+        {reason_html}
+
+        <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+        <p style="color: #999; font-size: 12px;">
+            VermietenHeute - Die Plattform für Vermieter
+        </p>
+    </div>
+    """
+
+    try:
+        resend.Emails.send({
+            "from": "VermietenHeute <noreply@vermietenheute.de>",
+            "to": to,
+            "subject": subject,
+            "html": html_content,
+        })
+        return True
+    except Exception as e:
+        print(f"Fehler beim E-Mail-Versand: {e}")
+        return False
+
+
+def send_viewing_rescheduled_email(
+    to: str,
+    applicant_name: str,
+    property_title: str,
+    property_address: str,
+    old_date: str,
+    old_time: str,
+    new_date: str,
+    new_time: str,
+    portal_token: str,
+    ics_data: bytes | None = None
+) -> bool:
+    """
+    Sendet eine Benachrichtigung über einen verschobenen Termin.
+
+    Args:
+        to: E-Mail-Adresse des Bewerbers
+        applicant_name: Name des Bewerbers
+        property_title: Titel der Immobilie
+        property_address: Adresse der Immobilie
+        old_date: Altes Datum
+        old_time: Alte Uhrzeit
+        new_date: Neues Datum
+        new_time: Neue Uhrzeit
+        portal_token: Token für Bewerber-Portal
+        ics_data: Optional - ICS-Kalenderdatei
+
+    Returns:
+        True wenn erfolgreich, False bei Fehler
+    """
+    portal_url = f"{settings.FRONTEND_URL}/bewerben/portal/{portal_token}"
+
+    if not settings.RESEND_API_KEY:
+        print(f"[DEV] Terminverschiebung an {to}:")
+        print(f"  - Alt: {old_date} um {old_time}")
+        print(f"  - Neu: {new_date} um {new_time}")
+        return True
+
+    init_resend()
+
+    html_content = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #f59e0b;">📅 Termin verschoben</h2>
+        <p>Hallo {applicant_name},</p>
+        <p>Ihr Besichtigungstermin wurde verschoben:</p>
+
+        <div style="background-color: #fef2f2; padding: 15px; border-radius: 6px; margin: 20px 0;">
+            <p style="margin: 0; color: #666; font-size: 14px;">Alter Termin (ABGESAGT):</p>
+            <p style="margin: 5px 0; text-decoration: line-through; color: #999;">
+                📅 {old_date} um {old_time} Uhr
+            </p>
+        </div>
+
+        <div style="background-color: #f0fdf4; padding: 20px; border-radius: 6px; margin: 20px 0; border-left: 4px solid #059669;">
+            <p style="margin: 0; color: #059669; font-size: 14px; font-weight: bold;">Neuer Termin:</p>
+            <p style="margin: 5px 0; font-weight: bold; font-size: 16px;">
+                {property_title}
+            </p>
+            <p style="margin: 10px 0;">
+                📍 {property_address}
+            </p>
+            <p style="margin: 10px 0; font-weight: bold; color: #059669;">
+                📅 {new_date} um {new_time} Uhr
+            </p>
+        </div>
+
+        <p style="margin: 25px 0;">
+            <a href="{portal_url}"
+               style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">
+                Zum Bewerber-Portal
+            </a>
+        </p>
+
+        <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+        <p style="color: #999; font-size: 12px;">
+            VermietenHeute - Die Plattform für Vermieter
+        </p>
+    </div>
+    """
+
+    try:
+        email_params = {
+            "from": "VermietenHeute <noreply@vermietenheute.de>",
+            "to": to,
+            "subject": f"Termin verschoben - {property_title}",
+            "html": html_content,
+        }
+
+        if ics_data:
+            import base64
+            email_params["attachments"] = [{
+                "filename": "besichtigung.ics",
+                "content": base64.b64encode(ics_data).decode(),
+                "type": "text/calendar"
+            }]
+
+        resend.Emails.send(email_params)
+        return True
+    except Exception as e:
+        print(f"Fehler beim E-Mail-Versand: {e}")
+        return False
+
+
 def send_email_change_email(to: str, token: str, name: str) -> bool:
     """
     Sendet eine E-Mail zur Bestätigung der neuen E-Mail-Adresse.

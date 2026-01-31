@@ -14,6 +14,9 @@ from app.models.application import Application
 from app.models.application_document import ApplicationDocument
 from app.models.property import Property
 from app.models.self_disclosure import SelfDisclosure
+from app.models.viewing import ViewingSlot
+from app.models.viewing_invitation import ViewingInvitation
+from app.models.booking import Booking
 from app.schemas.application_document import CATEGORY_LABELS
 
 
@@ -62,6 +65,41 @@ class SelfDisclosureInfo(BaseModel):
     total_fields: int
 
 
+class ViewingSlotInfo(BaseModel):
+    """Besichtigungstermin-Info für Portal."""
+    id: UUID
+    start_time: datetime
+    end_time: datetime
+    slot_type: str
+    available_spots: int
+    is_fully_booked: bool
+
+
+class ViewingInvitationInfo(BaseModel):
+    """Einladungs-Info für Portal."""
+    id: UUID
+    slot_id: UUID
+    invitation_token: str
+    status: str  # pending, accepted, declined
+    invited_at: datetime
+    responded_at: Optional[datetime]
+    viewing_slot: ViewingSlotInfo
+    property_title: str
+    property_address: str
+
+
+class ViewingBookingInfo(BaseModel):
+    """Buchungs-Info für Portal."""
+    id: UUID
+    slot_id: UUID
+    confirmed: bool
+    cancelled_at: Optional[datetime]
+    viewing_slot: ViewingSlotInfo
+    property_title: str
+    property_address: str
+    created_at: datetime
+
+
 class PortalResponse(BaseModel):
     """Vollständige Portal-Response."""
     # Bewerbungsdaten
@@ -87,6 +125,11 @@ class PortalResponse(BaseModel):
     documents_total_size_formatted: str
     documents_max_size: int
     documents_remaining_size: int
+
+    # Besichtigungen
+    viewing_invitations: List[ViewingInvitationInfo]
+    viewing_bookings: List[ViewingBookingInfo]
+    public_viewing_slots: List[ViewingSlotInfo]
 
 
 class ApplicationUpdateRequest(BaseModel):
@@ -124,6 +167,97 @@ def get_application_by_access_token(db: Session, access_token: str) -> Applicati
         )
 
     return application
+
+
+def get_slot_info(slot: ViewingSlot, db: Session) -> dict:
+    """Erstellt Slot-Info für Portal."""
+    confirmed_count = db.query(Booking).filter(
+        Booking.slot_id == slot.id,
+        Booking.confirmed == True,
+        Booking.cancelled_at == None
+    ).count()
+    available = slot.max_attendees - confirmed_count
+
+    return {
+        "id": slot.id,
+        "start_time": slot.start_time,
+        "end_time": slot.end_time,
+        "slot_type": slot.slot_type,
+        "available_spots": available,
+        "is_fully_booked": available <= 0
+    }
+
+
+def get_viewing_invitations(db: Session, application: Application, property_obj: Property) -> List[dict]:
+    """Holt alle Einladungen für eine Bewerbung."""
+    if not property_obj:
+        return []
+
+    invitations = db.query(ViewingInvitation).filter(
+        ViewingInvitation.application_id == application.id
+    ).order_by(ViewingInvitation.invited_at.desc()).all()
+
+    result = []
+    for inv in invitations:
+        slot = db.query(ViewingSlot).filter(ViewingSlot.id == inv.slot_id).first()
+        if not slot:
+            continue
+
+        result.append({
+            "id": inv.id,
+            "slot_id": inv.slot_id,
+            "invitation_token": inv.invitation_token,
+            "status": inv.status,
+            "invited_at": inv.invited_at,
+            "responded_at": inv.responded_at,
+            "viewing_slot": get_slot_info(slot, db),
+            "property_title": property_obj.title,
+            "property_address": f"{property_obj.address}, {property_obj.zip_code} {property_obj.city}"
+        })
+
+    return result
+
+
+def get_viewing_bookings(db: Session, application: Application, property_obj: Property) -> List[dict]:
+    """Holt alle Buchungen für eine Bewerbung."""
+    if not property_obj:
+        return []
+
+    bookings = db.query(Booking).filter(
+        Booking.application_id == application.id
+    ).order_by(Booking.created_at.desc()).all()
+
+    result = []
+    for booking in bookings:
+        slot = db.query(ViewingSlot).filter(ViewingSlot.id == booking.slot_id).first()
+        if not slot:
+            continue
+
+        result.append({
+            "id": booking.id,
+            "slot_id": booking.slot_id,
+            "confirmed": booking.confirmed,
+            "cancelled_at": booking.cancelled_at,
+            "viewing_slot": get_slot_info(slot, db),
+            "property_title": property_obj.title,
+            "property_address": f"{property_obj.address}, {property_obj.zip_code} {property_obj.city}",
+            "created_at": booking.created_at
+        })
+
+    return result
+
+
+def get_public_slots(db: Session, property_id: UUID) -> List[dict]:
+    """Holt alle öffentlichen Termine für eine Immobilie."""
+    now = datetime.utcnow()
+
+    slots = db.query(ViewingSlot).filter(
+        ViewingSlot.property_id == property_id,
+        ViewingSlot.access_type == "public",
+        ViewingSlot.start_time > now
+    ).order_by(ViewingSlot.start_time).all()
+
+    return [get_slot_info(slot, db) for slot in slots]
 
 
 def count_self_disclosure_fields(sd: SelfDisclosure) -> tuple:
@@ -239,7 +373,12 @@ def get_portal_data(
         "documents_total_size": total_size,
         "documents_total_size_formatted": format_file_size(total_size),
         "documents_max_size": MAX_TOTAL_SIZE,
-        "documents_remaining_size": MAX_TOTAL_SIZE - total_size
+        "documents_remaining_size": MAX_TOTAL_SIZE - total_size,
+
+        # Besichtigungen
+        "viewing_invitations": get_viewing_invitations(db, application, property_obj),
+        "viewing_bookings": get_viewing_bookings(db, application, property_obj),
+        "public_viewing_slots": get_public_slots(db, application.property_id) if property_obj else []
     }
 
 

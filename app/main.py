@@ -13,6 +13,7 @@ from slowapi.errors import RateLimitExceeded
 from app.config import settings
 from app.api import api_router
 from app.core.rate_limit import limiter
+from app.core.scheduler import start_scheduler, stop_scheduler
 
 
 # FastAPI-Anwendung erstellen
@@ -104,6 +105,9 @@ async def startup_event():
     print("Vermietenheute API gestartet")
     print("Dokumentation: http://localhost:8000/api/docs")
 
+    # Background-Scheduler für Erinnerungen starten
+    start_scheduler()
+
 
 # Shutdown-Event
 @app.on_event("shutdown")
@@ -111,4 +115,7 @@ async def shutdown_event():
     """
     Wird beim Beenden der Anwendung ausgeführt.
     """
+    # Background-Scheduler stoppen
+    stop_scheduler()
+
     print("Vermietenheute API wird beendet")

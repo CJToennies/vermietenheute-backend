@@ -16,7 +16,13 @@ class BookingBase(BaseModel):
 
 
 class BookingCreate(BookingBase):
-    """Schema für Buchungs-Erstellung."""
+    """Schema für Buchungs-Erstellung (öffentlich)."""
+    application_id: Optional[UUID] = None  # Optional: Verknüpfung mit Bewerbung
+
+
+class BookingFromInvitation(BaseModel):
+    """Schema für Buchung über Einladung."""
+    # Keine zusätzlichen Daten nötig - werden aus Einladung übernommen
     pass
 
 
@@ -25,6 +31,9 @@ class BookingResponse(BookingBase):
     id: UUID
     slot_id: UUID
     confirmed: bool
+    application_id: Optional[UUID] = None
+    invitation_id: Optional[UUID] = None
+    cancelled_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 
@@ -32,7 +41,23 @@ class BookingResponse(BookingBase):
         from_attributes = True
 
 
+class BookingWithSlotInfo(BookingResponse):
+    """Schema für Buchung mit Slot-Informationen."""
+    slot_start_time: datetime
+    slot_end_time: datetime
+    property_title: str
+    property_address: str
+
+
 class BookingListResponse(BaseModel):
     """Schema für Buchungs-Listen-Response."""
     items: list[BookingResponse]
     total: int
+
+
+class BookingCancelResponse(BaseModel):
+    """Schema für Stornierungsbestätigung."""
+    success: bool
+    message: str
+    booking_id: UUID
+    cancelled_at: datetime

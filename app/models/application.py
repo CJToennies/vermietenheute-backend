@@ -80,6 +80,15 @@ class Application(Base):
         back_populates="application",
         cascade="all, delete-orphan"
     )
+    viewing_invitations = relationship(
+        "ViewingInvitation",
+        back_populates="application",
+        cascade="all, delete-orphan"
+    )
+    viewing_bookings = relationship(
+        "Booking",
+        back_populates="application"
+    )
 
     @hybrid_property
     def has_self_disclosure(self) -> bool:

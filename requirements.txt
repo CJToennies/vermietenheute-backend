@@ -29,3 +29,10 @@ slowapi>=0.1.9
 
 # Supabase Storage
 supabase>=2.0.0
+
+# ICS Calendar
+icalendar>=5.0.0
+pytz>=2024.1
+
+# Background Jobs (for reminders)
+apscheduler>=3.10.0
