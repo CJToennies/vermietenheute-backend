@@ -120,12 +120,36 @@ def upload_file(
     storage_path = f"{folder}/{unique_name}"
 
     # Upload zu Supabase Storage
+    # Verschiedene SDK-Versionen haben unterschiedliche APIs
     try:
+        # Versuche mit file_options (neuere SDK Versionen)
         result = client.storage.from_(bucket).upload(
             path=storage_path,
             file=file_content,
-            file_options={"contentType": content_type}
+            file_options={
+                "content-type": content_type,  # Manche SDKs nutzen kebab-case
+                "contentType": content_type,   # Manche SDKs nutzen camelCase
+                "x-upsert": "true"             # Überschreibe falls existiert
+            }
         )
+    except TypeError:
+        # Fallback für ältere SDK Versionen ohne file_options
+        try:
+            result = client.storage.from_(bucket).upload(
+                path=storage_path,
+                file=file_content
+            )
+            # Content-Type nachträglich setzen (falls möglich)
+            try:
+                client.storage.from_(bucket).update(
+                    path=storage_path,
+                    file=file_content,
+                    file_options={"contentType": content_type}
+                )
+            except Exception:
+                pass
+        except Exception as e:
+            raise Exception(f"Upload fehlgeschlagen: {str(e)}")
     except Exception as e:
         error_msg = str(e)
         if "Bucket not found" in error_msg or "bucket" in error_msg.lower():
@@ -133,7 +157,11 @@ def upload_file(
                 f"Supabase Storage Bucket '{bucket}' nicht gefunden. "
                 "Bitte erstellen Sie den Bucket im Supabase Dashboard unter Storage."
             )
-        raise Exception(f"Upload fehlgeschlagen: {error_msg}")
+        # Bei "Duplicate" Fehler: Datei existiert bereits, URL trotzdem zurückgeben
+        if "Duplicate" in error_msg or "duplicate" in error_msg.lower():
+            pass  # Weiter zur URL-Generierung
+        else:
+            raise Exception(f"Upload fehlgeschlagen: {error_msg}")
 
     # Signierte URL generieren (für sofortige Anzeige nach Upload)
     signed_url = get_signed_url(storage_path)
