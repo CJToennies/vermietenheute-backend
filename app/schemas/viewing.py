@@ -138,6 +138,21 @@ class ViewingBulkInviteResponse(BaseModel):
     errors: List[str]
 
 
+class ViewingMultiApplicantInviteRequest(BaseModel):
+    """Schema für Einladung mehrerer Bewerber zu einem Termin."""
+    application_ids: List[UUID]
+    send_email: bool = True
+
+
+class ViewingMultiApplicantInviteResponse(BaseModel):
+    """Schema für Multi-Applicant-Invite Response."""
+    invited_count: int
+    failed_count: int
+    skipped_not_verified: int = 0
+    invitations: List["ViewingInvitationResponse"]
+    errors: List[str]
+
+
 class ViewingInvitationResponse(BaseModel):
     """Schema für Einladungs-Response."""
     id: UUID

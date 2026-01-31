@@ -32,6 +32,8 @@ from app.schemas.viewing import (
     ViewingInviteRequest,
     ViewingBulkInviteRequest,
     ViewingBulkInviteResponse,
+    ViewingMultiApplicantInviteRequest,
+    ViewingMultiApplicantInviteResponse,
     ViewingInvitationResponse,
     ViewingInvitationWithDetails,
     ViewingInvitationRespondRequest,
@@ -975,6 +977,152 @@ def bulk_invite_applicant(
     return {
         "invited_count": len(invitations),
         "failed_count": len(errors),
+        "invitations": invitations,
+        "errors": errors,
+    }
+
+
+@router.post("/{slot_id}/invite-multiple", response_model=ViewingMultiApplicantInviteResponse)
+def invite_multiple_applicants(
+    slot_id: UUID,
+    data: ViewingMultiApplicantInviteRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> dict:
+    """
+    Lädt mehrere Bewerber zu einem Termin ein.
+    Nur Bewerber mit verifizierter E-Mail werden eingeladen.
+
+    Args:
+        slot_id: UUID des Termins
+        data: Multi-Applicant-Einladungsdaten (application_ids, send_email)
+        db: Datenbank-Session
+        current_user: Authentifizierter Benutzer
+
+    Returns:
+        Zusammenfassung der Einladungen
+    """
+    # Slot prüfen
+    slot = db.query(ViewingSlot).filter(ViewingSlot.id == slot_id).first()
+
+    if not slot:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Besichtigungstermin nicht gefunden"
+        )
+
+    # Property für Berechtigungsprüfung
+    property_obj = db.query(Property).filter(Property.id == slot.property_id).first()
+
+    if not property_obj or property_obj.landlord_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Keine Berechtigung für diesen Termin"
+        )
+
+    invitations = []
+    errors = []
+    skipped_not_verified = 0
+
+    for app_id in data.application_ids:
+        try:
+            # Application prüfen
+            application = db.query(Application).filter(
+                Application.id == app_id
+            ).first()
+
+            if not application:
+                errors.append(f"Bewerbung {app_id} nicht gefunden")
+                continue
+
+            # Prüfen ob Bewerbung zur gleichen Property gehört
+            if application.property_id != slot.property_id:
+                errors.append(f"Bewerbung {application.first_name} {application.last_name} gehört nicht zu dieser Immobilie")
+                continue
+
+            # Prüfen ob E-Mail verifiziert
+            if not application.is_email_verified:
+                skipped_not_verified += 1
+                errors.append(f"{application.first_name} {application.last_name}: E-Mail nicht verifiziert")
+                continue
+
+            # Prüfen ob bereits eingeladen
+            existing = db.query(ViewingInvitation).filter(
+                ViewingInvitation.slot_id == slot_id,
+                ViewingInvitation.application_id == app_id
+            ).first()
+
+            if existing:
+                errors.append(f"{application.first_name} {application.last_name}: Bereits eingeladen")
+                continue
+
+            # Prüfen ob noch Plätze frei (für Gruppenbesichtigungen)
+            if slot.slot_type == "group":
+                confirmed_bookings = db.query(Booking).filter(
+                    Booking.slot_id == slot_id,
+                    Booking.confirmed == True,
+                    Booking.cancelled_at == None
+                ).count()
+
+                if confirmed_bookings >= slot.max_attendees:
+                    errors.append(f"Termin ist ausgebucht")
+                    break
+
+            # Einladung erstellen
+            invitation = ViewingInvitation(
+                slot_id=slot_id,
+                application_id=app_id
+            )
+
+            db.add(invitation)
+            db.flush()  # Um ID zu erhalten
+
+            invitations.append(invitation)
+
+            # E-Mail senden (mit ICS)
+            if data.send_email:
+                try:
+                    ics_data = generate_ics(
+                        slot_id=slot.id,
+                        property_title=property_obj.title,
+                        property_address=f"{property_obj.address}, {property_obj.zip_code} {property_obj.city}",
+                        start_time=slot.start_time,
+                        end_time=slot.end_time,
+                        description=f"Besichtigung bei {property_obj.title}",
+                        organizer_name=current_user.name,
+                    )
+
+                    email_sent = send_viewing_invitation_email(
+                        to=application.email,
+                        applicant_name=f"{application.first_name} {application.last_name}",
+                        property_title=property_obj.title,
+                        property_address=f"{property_obj.address}, {property_obj.zip_code} {property_obj.city}",
+                        viewing_date=slot.start_time.strftime("%d.%m.%Y"),
+                        viewing_time=slot.start_time.strftime("%H:%M"),
+                        invitation_token=invitation.invitation_token,
+                        portal_token=application.access_token or "",
+                        landlord_name=current_user.name,
+                        ics_data=ics_data
+                    )
+
+                    if not email_sent:
+                        errors.append(f"{application.first_name} {application.last_name}: Einladung erstellt, aber E-Mail konnte nicht gesendet werden")
+                except Exception as email_error:
+                    errors.append(f"{application.first_name} {application.last_name}: E-Mail-Fehler: {str(email_error)}")
+
+        except Exception as e:
+            errors.append(str(e))
+
+    db.commit()
+
+    # Einladungen refreshen
+    for inv in invitations:
+        db.refresh(inv)
+
+    return {
+        "invited_count": len(invitations),
+        "failed_count": len(errors) - skipped_not_verified,
+        "skipped_not_verified": skipped_not_verified,
         "invitations": invitations,
         "errors": errors,
     }
