@@ -69,13 +69,22 @@ def get_slot_response(slot: ViewingSlot, db: Session) -> dict:
         f"{b.first_name} {b.last_name}" for b in confirmed_bookings
     ]
 
-    # Nur ausstehende (pending) Einladungen zählen
+    # Nur ausstehende (pending) Einladungen abrufen
     # - accepted: bereits als Buchung gezählt
     # - declined: nicht mehr relevant
-    invitations_count = db.query(ViewingInvitation).filter(
+    pending_invitations = db.query(ViewingInvitation).filter(
         ViewingInvitation.slot_id == slot.id,
         ViewingInvitation.status == "pending"
-    ).count()
+    ).all()
+
+    invitations_count = len(pending_invitations)
+
+    # Namen der eingeladenen Bewerber extrahieren
+    invitee_names = []
+    for inv in pending_invitations:
+        app = db.query(Application).filter(Application.id == inv.application_id).first()
+        if app:
+            invitee_names.append(f"{app.first_name} {app.last_name}")
 
     return {
         "id": slot.id,
@@ -90,6 +99,7 @@ def get_slot_response(slot: ViewingSlot, db: Session) -> dict:
         "bookings_count": confirmed_count,
         "invitations_count": invitations_count,
         "attendee_names": attendee_names,
+        "invitee_names": invitee_names,
         "created_at": slot.created_at,
         "updated_at": slot.updated_at
     }
@@ -755,7 +765,8 @@ def cancel_booking(
                 property_address=f"{property_obj.address}, {property_obj.zip_code} {property_obj.city}",
                 viewing_date=slot.start_time.strftime("%d.%m.%Y"),
                 viewing_time=slot.start_time.strftime("%H:%M"),
-                cancelled_by="applicant"
+                cancelled_by="applicant",
+                landlord_name=landlord.name
             )
 
     return {

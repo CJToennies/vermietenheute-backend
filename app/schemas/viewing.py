@@ -93,6 +93,7 @@ class ViewingSlotResponse(BaseModel):
     bookings_count: int = 0
     invitations_count: int = 0
     attendee_names: List[str] = []  # Namen der Teilnehmer die zugesagt haben
+    invitee_names: List[str] = []  # Namen der eingeladenen Personen (ausstehend)
     created_at: datetime
     updated_at: datetime
 

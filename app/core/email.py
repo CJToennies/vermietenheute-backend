@@ -694,7 +694,8 @@ def send_viewing_cancelled_email(
     viewing_date: str,
     viewing_time: str,
     cancelled_by: str,  # "landlord" oder "applicant"
-    reason: str | None = None
+    reason: str | None = None,
+    landlord_name: str | None = None
 ) -> bool:
     """
     Sendet eine Benachrichtigung über einen abgesagten Termin.
@@ -708,6 +709,7 @@ def send_viewing_cancelled_email(
         viewing_time: Uhrzeit der Besichtigung
         cancelled_by: Wer hat abgesagt ("landlord" oder "applicant")
         reason: Optional - Begründung
+        landlord_name: Optional - Name des Vermieters (für Email an Vermieter)
 
     Returns:
         True wenn erfolgreich, False bei Fehler
@@ -721,11 +723,15 @@ def send_viewing_cancelled_email(
     init_resend()
 
     if cancelled_by == "landlord":
+        # Email geht an Bewerber
         subject = f"Termin abgesagt - {property_title}"
         intro_text = "Der Vermieter hat den folgenden Besichtigungstermin leider abgesagt:"
+        greeting_name = applicant_name
     else:
+        # Email geht an Vermieter
         subject = f"Stornierung: {applicant_name}"
         intro_text = f"{applicant_name} hat den folgenden Besichtigungstermin storniert:"
+        greeting_name = landlord_name or ""
 
     reason_html = ""
     if reason:
@@ -737,8 +743,8 @@ def send_viewing_cancelled_email(
 
     html_content = f"""
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2 style="color: #dc2626;">✗ Termin abgesagt</h2>
-        <p>Hallo,</p>
+        <h2 style="color: #dc2626;">Termin abgesagt</h2>
+        <p>Hallo{' ' + greeting_name if greeting_name else ''},</p>
         <p>{intro_text}</p>
 
         <div style="background-color: #fef2f2; padding: 20px; border-radius: 6px; margin: 20px 0; border-left: 4px solid #dc2626;">
