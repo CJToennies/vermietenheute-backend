@@ -7,7 +7,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from app.core.deps import get_db
-from app.core.storage import upload_file, delete_file, get_content_type
+from app.core.storage import upload_file, delete_file, get_content_type, get_signed_url
 from app.models.application import Application
 from app.models.application_document import ApplicationDocument
 from app.schemas.application_document import (
@@ -72,7 +72,19 @@ def get_total_documents_size(db: Session, application_id: uuid.UUID) -> int:
 
 
 def document_to_response(doc: ApplicationDocument) -> dict:
-    """Konvertiert ein Document Model zu Response dict."""
+    """
+    Konvertiert ein Document Model zu Response dict.
+    Generiert eine signierte URL (1 Stunde gültig) für sicheren Zugriff.
+    """
+    # Signierte URL generieren (nur wenn filepath vorhanden)
+    signed_url = None
+    if doc.filepath:
+        try:
+            signed_url = get_signed_url(doc.filepath)
+        except Exception:
+            # Fallback auf gespeicherte URL (für alte Dokumente)
+            signed_url = doc.url
+
     return {
         "id": doc.id,
         "application_id": doc.application_id,
@@ -81,7 +93,7 @@ def document_to_response(doc: ApplicationDocument) -> dict:
         "category": doc.category,
         "category_label": CATEGORY_LABELS.get(doc.category, doc.category),
         "filepath": doc.filepath,
-        "url": doc.url,  # Direkte Supabase Storage URL
+        "url": signed_url,  # Signierte URL (1h gültig)
         "file_size": doc.file_size,
         "file_size_formatted": format_file_size(doc.file_size),
         "created_at": doc.created_at

@@ -56,6 +56,7 @@ class ApplicationResponse(ApplicationBase):
     status: str
     is_email_verified: bool = False
     has_self_disclosure: bool = False
+    income: Optional[int] = None  # Nettoeinkommen aus Selbstauskunft (in Euro)
     documents: List[ApplicationDocumentInfo] = []
     created_at: datetime
     updated_at: datetime
@@ -133,11 +134,23 @@ def format_file_size(size_bytes: int) -> str:
 
 def application_to_response(application) -> dict:
     """Konvertiert Application Model zu Response dict mit Dokumenten."""
+    # Lazy import um circular imports zu vermeiden
+    from app.core.storage import get_signed_url
+
     documents = []
     if hasattr(application, 'documents') and application.documents:
         for doc in application.documents:
-            # Fallback für alte Dokumente ohne Supabase URL
-            doc_url = doc.url if doc.url else f"/api/documents/{doc.id}/download"
+            # Signierte URL generieren (1h gültig)
+            doc_url = None
+            if doc.filepath:
+                try:
+                    doc_url = get_signed_url(doc.filepath)
+                except Exception:
+                    # Fallback auf gespeicherte URL
+                    doc_url = doc.url
+            else:
+                doc_url = doc.url if doc.url else f"/api/documents/{doc.id}/download"
+
             documents.append({
                 "id": doc.id,
                 "filename": doc.filename,
@@ -149,6 +162,16 @@ def application_to_response(application) -> dict:
                 "file_size_formatted": format_file_size(doc.file_size),
                 "created_at": doc.created_at
             })
+
+    # Einkommen aus Selbstauskunft extrahieren (falls vorhanden)
+    income = None
+    if application.self_disclosure and application.self_disclosure.nettoeinkommen:
+        try:
+            # Nettoeinkommen kann als String gespeichert sein (z.B. "3000" oder "3.000")
+            income_str = application.self_disclosure.nettoeinkommen.replace(".", "").replace(",", "").strip()
+            income = int(income_str)
+        except (ValueError, AttributeError):
+            pass
 
     return {
         "id": application.id,
@@ -163,6 +186,7 @@ def application_to_response(application) -> dict:
         "status": application.status,
         "is_email_verified": application.is_email_verified,
         "has_self_disclosure": application.self_disclosure is not None,
+        "income": income,
         "documents": documents,
         "created_at": application.created_at,
         "updated_at": application.updated_at

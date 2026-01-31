@@ -1,6 +1,7 @@
 """
 Supabase Storage Service.
 Verwaltet Datei-Uploads und -Downloads.
+Nutzt private Buckets mit Signed URLs für Sicherheit.
 """
 import uuid
 from typing import Optional, Tuple
@@ -10,6 +11,9 @@ from app.config import settings
 
 # Supabase Client (lazy initialization)
 _supabase_client: Optional[Client] = None
+
+# Signed URL Gültigkeit in Sekunden (1 Stunde)
+SIGNED_URL_EXPIRY = 3600
 
 
 def get_supabase_client() -> Client:
@@ -32,6 +36,34 @@ def get_supabase_client() -> Client:
     return _supabase_client
 
 
+def get_signed_url(storage_path: str, expiry_seconds: int = SIGNED_URL_EXPIRY) -> str:
+    """
+    Generiert eine signierte URL für eine Datei.
+    Die URL ist nur für die angegebene Zeit gültig.
+
+    Args:
+        storage_path: Pfad in Storage (z.B. "folder/file.pdf")
+        expiry_seconds: Gültigkeit in Sekunden (default: 1 Stunde)
+
+    Returns:
+        Signierte URL
+
+    Raises:
+        Exception: Bei Fehler
+    """
+    client = get_supabase_client()
+    bucket = settings.SUPABASE_STORAGE_BUCKET
+
+    try:
+        result = client.storage.from_(bucket).create_signed_url(
+            path=storage_path,
+            expires_in=expiry_seconds
+        )
+        return result.get("signedURL") or result.get("signedUrl", "")
+    except Exception as e:
+        raise Exception(f"Fehler beim Erstellen der Signed URL: {str(e)}")
+
+
 def upload_file(
     file_content: bytes,
     filename: str,
@@ -40,6 +72,7 @@ def upload_file(
 ) -> Tuple[str, str]:
     """
     Lädt eine Datei zu Supabase Storage hoch.
+    Nutzt private Bucket - URLs werden bei Bedarf signiert.
 
     Args:
         file_content: Dateiinhalt als Bytes
@@ -48,7 +81,8 @@ def upload_file(
         content_type: MIME-Type der Datei
 
     Returns:
-        Tuple aus (storage_path, public_url)
+        Tuple aus (storage_path, signed_url)
+        Die signed_url ist 1 Stunde gültig.
 
     Raises:
         Exception: Bei Upload-Fehler
@@ -77,10 +111,10 @@ def upload_file(
             )
         raise Exception(f"Upload fehlgeschlagen: {error_msg}")
 
-    # Public URL generieren
-    public_url = client.storage.from_(bucket).get_public_url(storage_path)
+    # Signierte URL generieren (für sofortige Anzeige nach Upload)
+    signed_url = get_signed_url(storage_path)
 
-    return storage_path, public_url
+    return storage_path, signed_url
 
 
 def delete_file(storage_path: str) -> bool:
