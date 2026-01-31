@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from app.core.deps import get_db, get_current_user
-from app.core.email import send_application_portal_email
+from app.core.email import send_application_portal_email, send_new_application_notification, send_landlord_to_applicant_email
 from app.core.rate_limit import limiter, RATE_LIMIT_APPLICATION
 from app.config import settings
 from app.models.user import User
@@ -16,7 +16,8 @@ from app.models.property import Property
 from app.models.application import Application
 from app.schemas.application import (
     ApplicationCreate, ApplicationUpdate, ApplicationResponse, ApplicationCreateResponse,
-    ApplicationVerificationResponse, application_to_response
+    ApplicationVerificationResponse, application_to_response,
+    SendEmailRequest, SendEmailResponse
 )
 
 
@@ -94,7 +95,7 @@ def create_application(
     db.commit()
     db.refresh(application)
 
-    # Portal-E-Mail senden (mit Verifizierungslink und Portal-Link)
+    # Portal-E-Mail an Bewerber senden (mit Verifizierungslink und Portal-Link)
     applicant_name = f"{application.first_name} {application.last_name}"
     send_application_portal_email(
         to=application.email,
@@ -103,6 +104,21 @@ def create_application(
         property_title=property_obj.title,
         applicant_name=applicant_name
     )
+
+    # Benachrichtigung an Vermieter senden
+    if property_obj.landlord_id:
+        landlord = db.query(User).filter(User.id == property_obj.landlord_id).first()
+        if landlord:
+            send_new_application_notification(
+                to=landlord.email,
+                landlord_name=landlord.name,
+                property_title=property_obj.title,
+                applicant_name=applicant_name,
+                applicant_email=application.email,
+                applicant_phone=application.phone,
+                applicant_message=application.message,
+                property_id=str(property_obj.id)
+            )
 
     return application
 
@@ -314,4 +330,79 @@ def verify_application_email(
         "message": "E-Mail-Adresse erfolgreich verifiziert",
         "success": True,
         "property_title": property_title
+    }
+
+
+@router.post("/{application_id}/send-email", response_model=SendEmailResponse)
+def send_email_to_applicant(
+    application_id: UUID,
+    email_data: SendEmailRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+) -> dict:
+    """
+    Sendet eine E-Mail an den Bewerber.
+    Nur der Eigentümer der zugehörigen Immobilie kann E-Mails senden.
+
+    Templates:
+    - custom: Freier Text
+    - request_self_disclosure: Selbstauskunft anfordern
+    - invitation: Einladung zur Besichtigung
+    - rejection: Absage
+
+    Args:
+        application_id: UUID der Bewerbung
+        email_data: E-Mail-Daten (template, subject, message)
+        current_user: Authentifizierter Benutzer
+        db: Datenbank-Session
+
+    Returns:
+        Erfolgsmeldung
+
+    Raises:
+        HTTPException 404: Wenn Bewerbung nicht gefunden
+        HTTPException 403: Wenn keine Berechtigung
+        HTTPException 500: Wenn E-Mail-Versand fehlschlägt
+    """
+    application = db.query(Application).filter(
+        Application.id == application_id
+    ).first()
+
+    if not application:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Bewerbung nicht gefunden"
+        )
+
+    # Prüfen ob Benutzer Eigentümer der Immobilie ist
+    property_obj = db.query(Property).filter(
+        Property.id == application.property_id
+    ).first()
+
+    if not property_obj or property_obj.landlord_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Keine Berechtigung für diese Bewerbung"
+        )
+
+    # E-Mail senden
+    applicant_name = f"{application.first_name} {application.last_name}"
+    success = send_landlord_to_applicant_email(
+        to=application.email,
+        applicant_name=applicant_name,
+        subject=email_data.subject,
+        message=email_data.message,
+        landlord_name=current_user.name,
+        property_title=property_obj.title
+    )
+
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="E-Mail konnte nicht gesendet werden"
+        )
+
+    return {
+        "success": True,
+        "message": f"E-Mail wurde an {application.email} gesendet"
     }

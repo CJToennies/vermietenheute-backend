@@ -33,12 +33,13 @@ def format_file_size(size_bytes: int) -> str:
 # Response Schemas
 class PropertyInfo(BaseModel):
     """Kurzinfo zur Immobilie."""
-    id: UUID
+    id: Optional[UUID] = None
     title: str
     address: str
     city: str
     zip_code: str
     rent: float
+    is_available: bool = True  # False wenn Vermieter gelöscht oder Property nicht mehr existiert
 
 
 class DocumentInfo(BaseModel):
@@ -74,7 +75,7 @@ class PortalResponse(BaseModel):
     is_email_verified: bool
     created_at: datetime
 
-    # Immobilie
+    # Immobilie (kann "nicht mehr verfügbar" sein wenn Vermieter gelöscht)
     property: PropertyInfo
 
     # Selbstauskunft
@@ -169,11 +170,30 @@ def get_portal_data(
         Property.id == application.property_id
     ).first()
 
-    if not property_obj:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Immobilie nicht gefunden"
-        )
+    # Property-Info erstellen (auch wenn Property fehlt oder verwaist ist)
+    if property_obj:
+        # Property existiert - prüfen ob Vermieter noch da ist
+        is_available = property_obj.landlord_id is not None and property_obj.is_active
+        property_info = {
+            "id": property_obj.id,
+            "title": property_obj.title,
+            "address": property_obj.address,
+            "city": property_obj.city,
+            "zip_code": property_obj.zip_code,
+            "rent": property_obj.rent,
+            "is_available": is_available
+        }
+    else:
+        # Property existiert nicht mehr - Fallback
+        property_info = {
+            "id": None,
+            "title": "Immobilie nicht mehr verfügbar",
+            "address": "-",
+            "city": "-",
+            "zip_code": "-",
+            "rent": 0,
+            "is_available": False
+        }
 
     # Dokumente laden
     documents = db.query(ApplicationDocument).filter(
@@ -196,14 +216,7 @@ def get_portal_data(
         "status": application.status,
         "is_email_verified": application.is_email_verified,
         "created_at": application.created_at,
-        "property": {
-            "id": property_obj.id,
-            "title": property_obj.title,
-            "address": property_obj.address,
-            "city": property_obj.city,
-            "zip_code": property_obj.zip_code,
-            "rent": property_obj.rent
-        },
+        "property": property_info,
         "self_disclosure": {
             "exists": self_disclosure is not None,
             "completed_fields": completed,

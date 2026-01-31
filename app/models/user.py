@@ -22,6 +22,11 @@ class User(Base):
         is_verified: Ob die E-Mail verifiziert ist
         verification_token: Token zur E-Mail-Verifizierung
         verification_token_expires: Ablaufzeit des Tokens
+        password_reset_token: Token zum Passwort-Reset
+        password_reset_token_expires: Ablaufzeit des Reset-Tokens
+        pending_email: Neue E-Mail-Adresse (noch nicht bestätigt)
+        email_change_token: Token zur E-Mail-Änderung
+        email_change_token_expires: Ablaufzeit des Email-Change-Tokens
         created_at: Erstellungszeitpunkt
         updated_at: Letzter Änderungszeitpunkt
     """
@@ -41,6 +46,11 @@ class User(Base):
     is_verified = Column(Boolean, default=False, nullable=False)
     verification_token = Column(String(255), nullable=True, index=True)
     verification_token_expires = Column(DateTime, nullable=True)
+    password_reset_token = Column(String(255), nullable=True, index=True)
+    password_reset_token_expires = Column(DateTime, nullable=True)
+    pending_email = Column(String(255), nullable=True)
+    email_change_token = Column(String(255), nullable=True, index=True)
+    email_change_token_expires = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
         DateTime,

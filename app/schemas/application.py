@@ -41,7 +41,7 @@ class ApplicationDocumentInfo(BaseModel):
     display_name: Optional[str] = None
     category: str
     category_label: str
-    url: str
+    url: Optional[str] = None  # Kann None sein bei alten Dokumenten ohne Supabase Storage
     file_size: int
     file_size_formatted: str
     created_at: datetime
@@ -88,6 +88,22 @@ class ApplicationVerificationResponse(BaseModel):
     property_title: Optional[str] = None
 
 
+class SendEmailRequest(BaseModel):
+    """Schema für Email-Versand an Bewerber."""
+    template: str = Field(
+        ...,
+        description="Template-Typ: 'custom', 'request_self_disclosure', 'invitation', 'rejection'"
+    )
+    subject: str = Field(..., min_length=1, max_length=200)
+    message: str = Field(..., min_length=1)
+
+
+class SendEmailResponse(BaseModel):
+    """Schema für Email-Versand-Response."""
+    success: bool
+    message: str
+
+
 class ApplicationListResponse(BaseModel):
     """Schema für Bewerbungs-Listen-Response."""
     items: list[ApplicationResponse]
@@ -120,13 +136,15 @@ def application_to_response(application) -> dict:
     documents = []
     if hasattr(application, 'documents') and application.documents:
         for doc in application.documents:
+            # Fallback für alte Dokumente ohne Supabase URL
+            doc_url = doc.url if doc.url else f"/api/documents/{doc.id}/download"
             documents.append({
                 "id": doc.id,
                 "filename": doc.filename,
                 "display_name": doc.display_name,
                 "category": doc.category,
                 "category_label": DOCUMENT_CATEGORY_LABELS.get(doc.category, doc.category),
-                "url": doc.url,  # Direkte Supabase Storage URL
+                "url": doc_url,
                 "file_size": doc.file_size,
                 "file_size_formatted": format_file_size(doc.file_size),
                 "created_at": doc.created_at

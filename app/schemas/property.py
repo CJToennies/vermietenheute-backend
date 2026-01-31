@@ -24,6 +24,7 @@ class PropertyBase(BaseModel):
     furnished: bool = False
     pets_allowed: bool = False
     listing_url: Optional[str] = Field(None, max_length=500)
+    show_address_publicly: bool = True  # Adresse öffentlich anzeigen
 
 
 class PropertyCreate(PropertyBase):
@@ -47,16 +48,43 @@ class PropertyUpdate(BaseModel):
     furnished: Optional[bool] = None
     pets_allowed: Optional[bool] = None
     listing_url: Optional[str] = Field(None, max_length=500)
+    show_address_publicly: Optional[bool] = None
     is_active: Optional[bool] = None
 
 
 class PropertyResponse(PropertyBase):
-    """Schema für Immobilien-Response."""
+    """Schema für Immobilien-Response (für Vermieter)."""
     id: UUID
-    landlord_id: UUID
+    landlord_id: Optional[UUID] = None  # Kann None sein wenn Vermieter gelöscht
     is_active: bool
     created_at: datetime
     updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class PropertyPublicResponse(BaseModel):
+    """Schema für öffentliche Immobilien-Response (für Interessenten)."""
+    id: UUID
+    title: str
+    type: str
+    description: Optional[str] = None
+    # Adresse wird nur angezeigt wenn show_address_publicly = True
+    address: Optional[str] = None  # Kann "Adresse auf Anfrage" sein
+    city: str
+    zip_code: Optional[str] = None  # Kann versteckt sein
+    rent: Decimal
+    deposit: Optional[Decimal] = None
+    size: Optional[Decimal] = None
+    rooms: Optional[Decimal] = None
+    available_from: Optional[date] = None
+    furnished: bool
+    pets_allowed: bool
+    listing_url: Optional[str] = None
+    show_address_publicly: bool
+    is_active: bool
+    created_at: datetime
 
     class Config:
         from_attributes = True

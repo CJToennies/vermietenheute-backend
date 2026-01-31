@@ -64,3 +64,30 @@ class LoginRequest(BaseModel):
     """Schema für Login-Request."""
     email: EmailStr
     password: str
+
+
+class ForgotPasswordRequest(BaseModel):
+    """Schema für Passwort-vergessen-Anfrage."""
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    """Schema für Passwort-Reset."""
+    password: str = Field(..., min_length=8, max_length=100)
+
+
+class ChangePasswordRequest(BaseModel):
+    """Schema für Passwort-Änderung (eingeloggt)."""
+    current_password: str
+    new_password: str = Field(..., min_length=8, max_length=100)
+
+
+class ChangeEmailRequest(BaseModel):
+    """Schema für Email-Änderung."""
+    new_email: EmailStr
+    password: str  # Passwort-Bestätigung erforderlich
+
+
+class DeleteAccountRequest(BaseModel):
+    """Schema für Account-Löschung."""
+    password: str  # Passwort-Bestätigung erforderlich

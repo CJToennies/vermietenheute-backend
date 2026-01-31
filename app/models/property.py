@@ -44,8 +44,8 @@ class Property(Base):
     )
     landlord_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("users.id", ondelete="CASCADE"),
-        nullable=False,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,  # Nullable für verwaiste Properties (Vermieter gelöscht)
         index=True
     )
     title = Column(String(200), nullable=False)
@@ -62,6 +62,7 @@ class Property(Base):
     furnished = Column(Boolean, default=False, nullable=False)
     pets_allowed = Column(Boolean, default=False, nullable=False)
     listing_url = Column(String(500), nullable=True)  # Externe Anzeigen-URL (ImmobilienScout, etc.)
+    show_address_publicly = Column(Boolean, default=True, nullable=False)  # Adresse öffentlich anzeigen
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(

@@ -5,18 +5,50 @@ CRUD-Operationen und Bewerbungs-Abruf.
 from typing import Optional
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from app.core.deps import get_db, get_current_user
 from app.models.user import User
 from app.models.property import Property
 from app.models.application import Application
 from app.schemas.property import (
-    PropertyCreate, PropertyUpdate, PropertyResponse, PropertyListResponse
+    PropertyCreate, PropertyUpdate, PropertyResponse, PropertyListResponse, PropertyPublicResponse
 )
 from app.schemas.application import ApplicationResponse, ApplicationListResponse, application_to_response
 
 
 router = APIRouter()
+
+
+def property_to_public_response(property_obj: Property) -> dict:
+    """Konvertiert Property zu öffentlicher Response mit optionaler Adress-Maskierung."""
+    response = {
+        "id": property_obj.id,
+        "title": property_obj.title,
+        "type": property_obj.type,
+        "description": property_obj.description,
+        "city": property_obj.city,
+        "rent": property_obj.rent,
+        "deposit": property_obj.deposit,
+        "size": property_obj.size,
+        "rooms": property_obj.rooms,
+        "available_from": property_obj.available_from,
+        "furnished": property_obj.furnished,
+        "pets_allowed": property_obj.pets_allowed,
+        "listing_url": property_obj.listing_url,
+        "show_address_publicly": property_obj.show_address_publicly,
+        "is_active": property_obj.is_active,
+        "created_at": property_obj.created_at,
+    }
+
+    # Adresse nur anzeigen wenn show_address_publicly = True
+    if property_obj.show_address_publicly:
+        response["address"] = property_obj.address
+        response["zip_code"] = property_obj.zip_code
+    else:
+        response["address"] = None  # Frontend zeigt "Adresse auf Anfrage"
+        response["zip_code"] = None
+
+    return response
 
 
 @router.get("", response_model=PropertyListResponse)
@@ -121,13 +153,16 @@ def create_property(
 @router.get("/{property_id}", response_model=PropertyResponse)
 def get_property(
     property_id: UUID,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ) -> Property:
     """
-    Ruft eine einzelne Immobilie ab.
+    Ruft eine einzelne Immobilie ab (für eingeloggte Vermieter).
+    Zeigt alle Details inkl. Adresse.
 
     Args:
         property_id: UUID der Immobilie
+        current_user: Authentifizierter Benutzer
         db: Datenbank-Session
 
     Returns:
@@ -135,6 +170,7 @@ def get_property(
 
     Raises:
         HTTPException 404: Wenn Immobilie nicht gefunden
+        HTTPException 403: Wenn keine Berechtigung
     """
     property_obj = db.query(Property).filter(Property.id == property_id).first()
 
@@ -144,7 +180,50 @@ def get_property(
             detail="Immobilie nicht gefunden"
         )
 
+    # Nur eigene Properties oder Admin dürfen volle Details sehen
+    if property_obj.landlord_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Keine Berechtigung für diese Immobilie"
+        )
+
     return property_obj
+
+
+@router.get("/{property_id}/public", response_model=PropertyPublicResponse)
+def get_property_public(
+    property_id: UUID,
+    db: Session = Depends(get_db)
+) -> dict:
+    """
+    Ruft eine einzelne Immobilie ab (öffentlich, ohne Auth).
+    Adresse wird nur angezeigt wenn show_address_publicly = True.
+
+    Args:
+        property_id: UUID der Immobilie
+        db: Datenbank-Session
+
+    Returns:
+        Die Immobilie (mit maskierter Adresse falls nicht öffentlich)
+
+    Raises:
+        HTTPException 404: Wenn Immobilie nicht gefunden oder nicht aktiv
+    """
+    property_obj = db.query(Property).filter(Property.id == property_id).first()
+
+    if not property_obj:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Immobilie nicht gefunden"
+        )
+
+    if not property_obj.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Immobilie nicht mehr verfügbar"
+        )
+
+    return property_to_public_response(property_obj)
 
 
 @router.patch("/{property_id}", response_model=PropertyResponse)
@@ -274,8 +353,11 @@ def list_property_applications(
             detail="Keine Berechtigung für diese Immobilie"
         )
 
-    # Bewerbungen abfragen
-    query = db.query(Application).filter(Application.property_id == property_id)
+    # Bewerbungen abfragen mit Eager Loading der Relationships
+    query = db.query(Application).options(
+        joinedload(Application.documents),
+        joinedload(Application.self_disclosure)
+    ).filter(Application.property_id == property_id)
 
     if status_filter:
         query = query.filter(Application.status == status_filter)
